@@ -249,6 +249,10 @@ The push covers the refs the rewrite moved, and only those: a ref whose commits 
 
 A branch is pushed with `--force-with-lease` against its remote-tracking ref, so a remote that moved since the last fetch rejects the push. A ref with no remote-tracking counterpart, a tag for instance, has nothing to lease against and is forced; those refs are named in the output.
 
+A carried tag is published with the rewrite rather than held back: a tag left on the remote naming a commit no branch there reaches is the state the local repoint exists to avoid, and leaving the remote in it would need a second command. Since a tag cannot be leased, the remote's value for every forced ref is read once with `git ls-remote` before the push, and a ref standing anywhere other than where the rewrite found it stops the push instead of being overwritten.
+
+That check covers a tag someone else moved, up to the moment it is read; a lease is atomic and this is not, so a tag moved between the read and the push is still overwritten. Leasing each tag against `ls-remote` would close that too, and is the change to make in a repository where more than one person moves tags.
+
 ## Limitations
 
 - Only commit messages and identities are rewritten. File contents are untouched.

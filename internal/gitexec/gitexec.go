@@ -267,6 +267,29 @@ func (r *Repo) RemoteRefs(remote string) ([]string, error) {
 }
 
 // Describe returns a commit's date and subject.
+// RemoteValues returns the commit each of the named refs points at on the
+// remote, read over the network. A tag has no remote-tracking ref to read
+// instead, and a ref the remote does not carry is left out of the map rather
+// than reported as an error. --refs drops the peeled ^{} line an annotated tag
+// adds, leaving the value the ref itself holds.
+func (r *Repo) RemoteValues(remote string, refs []string) (map[string]string, error) {
+	args := append([]string{"ls-remote", "--refs", remote}, refs...)
+	out, err := r.Output(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	values := map[string]string{}
+	for _, line := range nonEmptyLines(out) {
+		hash, ref, found := strings.Cut(line, "\t")
+		if !found {
+			continue
+		}
+		values[strings.TrimSpace(ref)] = strings.TrimSpace(hash)
+	}
+	return values, nil
+}
+
 func (r *Repo) Describe(hash string) string {
 	out, err := r.Output("log", "-1", "--format=%cs %s", hash)
 	if err != nil {

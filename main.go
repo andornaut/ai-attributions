@@ -560,6 +560,9 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	reportUnleased(publish)
 
 	if cfg.push {
+		if err := checkUnleased(repo, cfg.remote, publish); err != nil {
+			return err
+		}
 		fmt.Printf("\npushing to %s\n", cfg.remote)
 		return repo.Run(pushArgs(cfg.remote, publish)...)
 	}
@@ -684,16 +687,62 @@ func publishable(targets []target) []target {
 // reportUnleased names the refs that will be pushed without a lease, so the
 // weaker guarantee is visible rather than implied.
 func reportUnleased(targets []target) {
+	unleased := unleasedRefs(targets)
+	if len(unleased) > 0 {
+		fmt.Printf("\nno remote-tracking ref for %s, so these are forced; the remote is read once beforehand and the push stops if one has moved\n",
+			strings.Join(unleased, ", "))
+	}
+}
+
+func unleasedRefs(targets []target) []string {
 	var unleased []string
 	for _, t := range targets {
 		if t.lease == "" {
 			unleased = append(unleased, t.ref)
 		}
 	}
-	if len(unleased) > 0 {
-		fmt.Printf("\nno remote-tracking ref for %s, so these are pushed without a lease\n",
-			strings.Join(unleased, ", "))
+	return unleased
+}
+
+// checkUnleased stops a push that would force a ref over a value this run never
+// saw. A tag has no remote-tracking ref to lease against, so the remote is read
+// once and compared instead. That leaves the moment between the read and the
+// push uncovered, which a lease per ref would close; a repository where more
+// than one person moves tags is the one that needs it.
+func checkUnleased(repo *gitexec.Repo, remote string, targets []target) error {
+	unleased := unleasedRefs(targets)
+	if len(unleased) == 0 {
+		return nil
 	}
+	values, err := repo.RemoteValues(remote, unleased)
+	if err != nil {
+		return err
+	}
+	// The rewrite is already done and backed up by the time the push runs, and
+	// a second run would find the history clean and publish nothing, so the way
+	// out is the push itself rather than another run.
+	if stale, held, found := staleRef(values, targets); found {
+		return fmt.Errorf("%s is %s on %s, not the %s this run rewrote.\nThe rewrite here stands. Fetch that ref, work out what it carries, then publish with:\n\n    git %s",
+			stale.ref, gitexec.Short(held), remote, gitexec.Short(stale.hash),
+			strings.Join(pushArgs(remote, targets), " "))
+	}
+	return nil
+}
+
+// staleRef returns the first unleased ref the remote holds at a value other
+// than the one the rewrite started from. A ref the remote does not carry is
+// created by the push and has nothing to overwrite.
+func staleRef(values map[string]string, targets []target) (target, string, bool) {
+	for _, t := range targets {
+		if t.lease != "" {
+			continue
+		}
+		held, carried := values[t.ref]
+		if carried && held != t.hash {
+			return t, held, true
+		}
+	}
+	return target{}, "", false
 }
 
 // pushArgs builds the push. A ref with a known remote value is leased against
