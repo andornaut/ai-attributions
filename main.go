@@ -1,7 +1,7 @@
 // Command ai-attributions removes AI attributions from a repository's git
-// history: co-author and session trailers, "generated with" footers, the agent
-// identities on the commits themselves, and the emdashes that ride along on
-// those same commits.
+// history: co-author and session trailers, "generated with" footers, and the
+// agent identities on the commits themselves. --emdashes adds the emdashes
+// that ride along on those same commits.
 package main
 
 import (
@@ -24,6 +24,8 @@ import (
 
 const usage = `usage: ai-attributions [command] [flags] [repo-path]
 
+AI attributions are ads, block them!
+
 Reports the AI attributions in a repository's history. Nothing is rewritten
 unless the apply command asks for it. repo-path defaults to the current
 directory.
@@ -40,9 +42,6 @@ flags:
 
 const (
 	backupPrefix = "refs/ai-attributions-backup/"
-
-	// identityNone turns off identity rewriting, so that one flag covers both
-	// choosing an identity and declining to touch them.
 	identityNone = "none"
 )
 
@@ -53,8 +52,6 @@ var errFound = errors.New("attributions found")
 // stampRe matches the timestamp a backup is saved under.
 var stampRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
-// commands are the modes the tool runs in. They are mutually exclusive, which
-// is why they are commands rather than flags.
 var commands = map[string]bool{
 	"scan": true, "apply": true,
 	"backups": true, "restore": true, "version": true,
@@ -63,14 +60,15 @@ var commands = map[string]bool{
 type config struct {
 	command  string
 	all      bool
+	emdashes bool
 	exclude  refPatterns
 	exitCode bool
 	identity string
 	push     bool
 	verbose  bool
 
-	// remote is resolved from the branch's upstream once the repository is
-	// open, rather than assumed to be origin.
+	// remote is resolved from the branch's upstream, rather than assumed to be
+	// origin.
 	remote string
 }
 
@@ -86,8 +84,7 @@ type target struct {
 }
 
 // identity is the name and address to put on a commit an agent authored. Both
-// parts are set together or not at all, so that a rewrite can never assign half
-// of one.
+// parts are set together or not at all, so a rewrite cannot assign half of one.
 type identity struct {
 	name    string
 	address string
@@ -97,7 +94,7 @@ type identity struct {
 func (i identity) String() string { return i.name + " <" + i.address + ">" }
 
 // resolved reports whether there is an identity to re-attribute to. Scanning
-// works without one; only a rewrite needs it.
+// works without one.
 func (i identity) resolved() bool { return i.name != "" && i.address != "" }
 
 // refPatterns collects the repeatable --exclude flag.
@@ -132,7 +129,7 @@ func run(argv []string) error {
 		}
 		stamp, args = args[0], args[1:]
 		// The timestamp comes first, so a lone path would otherwise be read as
-		// one and fail somewhere less obvious.
+		// one.
 		if !stampRe.MatchString(strings.Trim(stamp, "/")) {
 			return fmt.Errorf("restore expects a timestamp like 20260811T121757Z, got %q; ai-attributions backups lists them", stamp)
 		}
@@ -182,13 +179,14 @@ func parseArgs(argv []string) (config, []string, error) {
 
 	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
 	flags.BoolVar(&cfg.all, "all", false, "every local branch and tag, not just the current branch")
+	flags.BoolVar(&cfg.emdashes, "emdashes", false, "also rewrite emdashes, on the commits an attribution is already moving")
 	flags.Var(&cfg.exclude, "exclude", "skip refs matching this `glob` (repeatable)")
 	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when attributions are found, as git diff does (scan only)")
 	flags.StringVar(&cfg.identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
 	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs (apply only)")
 	flags.BoolVar(&cfg.verbose, "verbose", false, "report every commit rather than a summary")
 	flags.Usage = func() {
-		fmt.Fprint(flags.Output(), usage)
+		_, _ = fmt.Fprint(flags.Output(), usage)
 		printFlags(flags.Output(), flags)
 	}
 	if err := flags.Parse(argv); err != nil {
@@ -213,7 +211,7 @@ func printFlags(out io.Writer, flags *flag.FlagSet) {
 		if kind != "" {
 			label += " " + kind
 		}
-		fmt.Fprintf(out, "  %-20s %s\n", label, usage)
+		_, _ = fmt.Fprintf(out, "  %-20s %s\n", label, usage)
 	})
 }
 
@@ -242,18 +240,15 @@ func scan(repo *gitexec.Repo, cfg config) error {
 	if err != nil {
 		return err
 	}
-	// Both transformations are always on. An emdash cannot move a commit by
-	// itself, so there is nothing worth turning off.
-	opts := clean.Options{Trailers: true, Emdashes: true}
+	// Trailers are the point of the tool. Emdashes are asked for: they move no
+	// commit by themselves, so leaving them costs nothing.
+	opts := clean.Options{Trailers: true, Emdashes: cfg.emdashes}
 
 	found := inspect(opts, who, commits)
 	found.report(cfg.verbose, refs)
 	if err := found.reportRadius(repo, refs); err != nil {
 		return err
 	}
-	// Reported after the findings and counted in none of them. apply rewrites
-	// the refs in scope, so scan answers for the same set: what is outside it
-	// is a pointer to another run, not a result of this one.
 	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 		return err
 	}
@@ -277,7 +272,7 @@ func scan(repo *gitexec.Repo, cfg config) error {
 // was forked from. A remote named upstream is the convention that git and gh
 // set up; a remote that has been fetched from and points at another project is
 // the general case. Both are measured against own, the remote the current
-// branch tracks, whose project is this repository's own.
+// branch tracks.
 func forkUpstream(repo *gitexec.Repo, own string) (gitexec.Remote, bool, error) {
 	remotes, err := repo.Remotes()
 	if err != nil {
@@ -298,8 +293,7 @@ func forkUpstream(repo *gitexec.Repo, own string) (gitexec.Remote, bool, error) 
 			continue
 		}
 		// A remote that has never been fetched from, a deploy target for
-		// instance, has brought no history here, so none of this repository's
-		// commits came from the project it names.
+		// instance, has brought no history here.
 		refs, err := repo.RemoteRefs(remote.Name)
 		if err != nil {
 			return gitexec.Remote{}, false, err
@@ -313,7 +307,7 @@ func forkUpstream(repo *gitexec.Repo, own string) (gitexec.Remote, bool, error) 
 
 // ownProject returns the project the named remote points at, which the other
 // remotes are compared against. A repository whose branch tracks nothing falls
-// back to the first remote, since configuration order is all there is to go on.
+// back to the first remote.
 func ownProject(remotes []gitexec.Remote, own string) string {
 	for _, remote := range remotes {
 		if remote.Name == own {
@@ -323,9 +317,6 @@ func ownProject(remotes []gitexec.Remote, own string) string {
 	return remotes[0].Project
 }
 
-// reportFork says why the repository was passed over. A fork's history is
-// mostly another project's, and those commits are that project's record: the
-// attributions in them belong to the people who wrote them.
 func reportFork(repo *gitexec.Repo, upstream gitexec.Remote) {
 	fmt.Printf("skipping %s: a fork, tracking %s through the %s remote\n",
 		repo.Dir(), upstream.Project, upstream.Name)
@@ -348,8 +339,7 @@ func targetRemote(repo *gitexec.Repo) string {
 
 // targetIdentity resolves who agent-authored commits are re-attributed to. A
 // bad --identity is always an error, but an unset git identity is only one when
-// there is a rewrite to do: scanning reports agent identities without needing
-// somewhere to move them to.
+// there is a rewrite to do.
 func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
 	if cfg.identity == identityNone {
 		return identity{}, nil
@@ -411,16 +401,15 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 	return kept, nil
 }
 
-// matches reports whether a ref is excluded, testing each pattern against the
-// full ref and its short forms, so that --exclude dev covers refs/tags/dev and
-// --exclude agent-work covers refs/remotes/origin/agent-work.
+// matches tests each pattern against the full ref and its short forms, so
+// --exclude dev covers refs/tags/dev and --exclude agent-work covers
+// refs/remotes/origin/agent-work.
 func (p refPatterns) matches(ref string) (bool, error) {
 	candidates := []string{ref}
 	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
 		if short, ok := strings.CutPrefix(ref, prefix); ok {
 			candidates = append(candidates, short)
-			// A remote-tracking ref is still qualified by its remote, so the
-			// branch name on its own is offered too.
+			// A remote-tracking ref is still qualified by its remote.
 			if prefix == "refs/remotes/" {
 				if _, branch, found := strings.Cut(short, "/"); found {
 					candidates = append(candidates, branch)
@@ -531,8 +520,8 @@ func reportRewritten(repo *gitexec.Repo, targets []target) {
 	}
 }
 
-// reportUnleased names the refs that will be pushed without a lease, so that
-// the weaker guarantee is visible rather than implied.
+// reportUnleased names the refs that will be pushed without a lease, so the
+// weaker guarantee is visible rather than implied.
 func reportUnleased(targets []target) {
 	var unleased []string
 	for _, t := range targets {
@@ -547,8 +536,7 @@ func reportUnleased(targets []target) {
 }
 
 // pushArgs builds the push. A ref with a known remote value is leased against
-// it, so a remote that moved since the last fetch rejects the push; a ref
-// without one is forced, since there is no observed value to compare to.
+// it; a ref without one is forced, since there is no value to compare to.
 func pushArgs(remote string, targets []target) []string {
 	args := []string{"push", remote}
 	for _, t := range targets {
@@ -566,7 +554,6 @@ func pushArgs(remote string, targets []target) []string {
 	return args
 }
 
-// listBackups prints the saved refs, grouped by the run that saved them.
 func listBackups(repo *gitexec.Repo) error {
 	out, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname:short)", backupPrefix)
 	if err != nil {
@@ -586,11 +573,9 @@ func listBackups(repo *gitexec.Repo) error {
 	return nil
 }
 
-// restoreBackup points each saved ref back at the commit it held.
 func restoreBackup(repo *gitexec.Repo, stamp string) error {
-	// Ref completion offers a trailing slash. Left on, it would build a prefix
-	// that matches nothing, and every ref would be restored to a name derived
-	// from an untrimmed path while the real branch stayed where it was.
+	// Ref completion offers a trailing slash, which would build a prefix that
+	// matches nothing.
 	stamp = strings.Trim(stamp, "/")
 	if stamp == "" {
 		return fmt.Errorf("restore needs a backup timestamp; ai-attributions backups lists them")
@@ -633,7 +618,7 @@ func shorten(hash string) string {
 	return hash
 }
 
-// sortedByCount renders a tally as lines ordered by descending count.
+// sortedByCount orders a tally's keys by descending count.
 func sortedByCount(tally map[string]int) []string {
 	keys := make([]string, 0, len(tally))
 	for key := range tally {

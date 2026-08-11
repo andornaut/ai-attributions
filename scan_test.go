@@ -28,8 +28,8 @@ func commit(c gitexec.Commit, hash, message string) gitexec.Commit {
 }
 
 // An emdash never moves a commit on its own. It is cleaned up only where an
-// attribution is already moving the commit, so that the blast radius of a
-// rewrite is decided by attributions alone.
+// attribution is already moving the commit, so the number of commits changing
+// hash is decided by attributions alone.
 func TestEmdashesRideAlongOnly(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -52,7 +52,7 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 			who:         who,
 			commit:      commit(person, "a2", "tidy the parser — it was unreadable\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"),
 			wantFlagged: 1,
-			wantMessage: "tidy the parser: it was unreadable\n",
+			wantMessage: "tidy the parser - it was unreadable\n",
 		},
 		{
 			name:        "emdash rides along with an agent identity",
@@ -60,7 +60,7 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 			who:         who,
 			commit:      commit(agent, "a3", "tidy the parser — it was unreadable\n"),
 			wantFlagged: 1,
-			wantMessage: "tidy the parser: it was unreadable\n",
+			wantMessage: "tidy the parser - it was unreadable\n",
 		},
 		{
 			name:        "emdash is left alone when identity rewriting is off",
@@ -78,7 +78,7 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 			wantMessage: "tidy the parser\n",
 		},
 		{
-			name:        "emdash is not touched when -no-emdashes is set",
+			name:        "emdash is not touched unless --emdashes asks for it",
 			opts:        clean.Options{Trailers: true},
 			who:         who,
 			commit:      commit(person, "a6", "tidy the parser — it was unreadable\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"),
@@ -122,5 +122,55 @@ func TestEmdashesLeftAreCounted(t *testing.T) {
 	}
 	if found.flagged != 0 {
 		t.Errorf("flagged = %d, want 0", found.flagged)
+	}
+}
+
+// A message that is not valid UTF-8 cannot be carried through JSON, so it is
+// counted and left alone. The identities beside it are still rewritten.
+func TestInvalidUTF8MessageIsSkipped(t *testing.T) {
+	found := inspect(all, who, []gitexec.Commit{
+		commit(agent, "c1", "tidy the parser \xff\xfe — it was unreadable\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"),
+	})
+
+	if found.skipped != 1 {
+		t.Errorf("skipped = %d, want 1", found.skipped)
+	}
+	change := found.changes["c1"]
+	if change.Message != "" {
+		t.Errorf("message = %q, want it left alone", change.Message)
+	}
+	if change.AuthorName != who.name || change.AuthorEmail != who.address {
+		t.Errorf("author = %q <%q>, want %s", change.AuthorName, change.AuthorEmail, who)
+	}
+}
+
+// Scanning without a git identity configured reports the agent identities it
+// found without anywhere to move them to, so a commit is flagged and counted
+// while producing no change to apply. Half an identity is no identity, since a
+// rewrite that assigned it would write an empty name or address onto a commit.
+func TestIdentityWithoutSomewhereToMoveIt(t *testing.T) {
+	tests := []struct {
+		name string
+		who  identity
+	}{
+		{"neither name nor address", identity{enabled: true}},
+		{"a name and no address", identity{name: "Ada", enabled: true}},
+		{"an address and no name", identity{address: "ada@example.com", enabled: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			found := inspect(all, tt.who, []gitexec.Commit{commit(agent, "d1", "tidy the parser\n")})
+
+			if found.flagged != 1 {
+				t.Errorf("flagged = %d, want 1", found.flagged)
+			}
+			if len(found.changes) != 0 {
+				t.Errorf("changes = %v, want none", found.changes)
+			}
+			if len(found.identities) != 2 {
+				t.Errorf("identities = %v, want the author and the committer", found.identities)
+			}
+		})
 	}
 }

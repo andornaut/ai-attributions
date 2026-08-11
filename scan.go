@@ -10,7 +10,6 @@ import (
 	"github.com/andornaut/ai-attributions/internal/rewrite"
 )
 
-// findings is what a scan turned up over the commits it walked.
 type findings struct {
 	changes    map[string]rewrite.Change
 	removed    map[string]int
@@ -23,8 +22,8 @@ type findings struct {
 	// len(changes): an agent identity with nowhere to move to is reported and
 	// counted, but produces no change.
 	flagged int
-	// emdashesLeft counts commits whose only finding is an emdash, which is
-	// not enough on its own to move a commit.
+	// emdashesLeft counts commits whose only finding is an emdash, which is not
+	// enough on its own to move a commit.
 	emdashesLeft int
 }
 
@@ -55,9 +54,9 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		item := detail{commit: commit}
 		flagged := false
 
-		// The rewrite carries messages as JSON, which cannot hold bytes that
-		// are not valid UTF-8 without replacing them. Such a message is left
-		// exactly as it is, though the identities beside it can still be fixed.
+		// The rewrite carries messages as JSON, which cannot hold bytes that are
+		// not valid UTF-8. Such a message is left as it is, though the
+		// identities beside it can still be fixed.
 		readable := utf8.ValidString(commit.Message)
 		if !readable {
 			found.skipped++
@@ -95,8 +94,8 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			}
 		}
 
-		// The message is rewritten with the full set of transformations only
-		// once something else about the commit has earned the rewrite.
+		// Emdashes are rewritten only once something else has earned the
+		// rewrite.
 		if readable {
 			if flagged {
 				if got := clean.Inspect(opts, commit.Message); !got.Empty() {
@@ -176,8 +175,6 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	}
 }
 
-// reportEmdashesLeft accounts for the emdashes the run deliberately did not
-// touch, so that leaving them reads as a decision rather than an oversight.
 func (f findings) reportEmdashesLeft() {
 	switch f.emdashesLeft {
 	case 0:
@@ -200,8 +197,7 @@ func (f findings) reportSkipped() {
 }
 
 // reportRadius names how many commits the rewrite moves. Every descendant of a
-// changed commit gets a new hash, which is the number that decides whether a
-// rewrite is worth doing.
+// changed commit gets a new hash.
 func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 	if len(f.changes) == 0 {
 		return nil
@@ -245,11 +241,9 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 }
 
 // reportRemoteOnly names remote branches that carry attributions and are not
-// covered by the refs in scope. They hold work that was never checked out here,
-// so the tool reports them rather than rewriting refs it has not been pointed
-// at. It reads remote-tracking refs rather than the remote itself, so that a
-// scan needs no network.
-// Nothing it finds counts toward the run's own findings or its exit code, which
+// covered by the refs in scope, rather than rewriting refs the tool was not
+// pointed at. It reads remote-tracking refs, so a scan needs no network.
+// Nothing it finds counts toward the run's findings or its exit code, which
 // answer for the refs in scope, the same set apply rewrites.
 func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) error {
 	if !repo.HasRemote(cfg.remote) {
@@ -269,8 +263,8 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		if excluded {
 			continue
 		}
-		// A ref that cannot be walked is called out rather than skipped, so
-		// that an unreadable branch does not read as a clean one.
+		// A ref that cannot be walked is called out rather than skipped, so an
+		// unreadable branch does not read as a clean one.
 		commits, err := repo.CommitsNotIn(localRefs, ref)
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))

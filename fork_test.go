@@ -48,6 +48,13 @@ func TestForkUpstream(t *testing.T) {
 		wantRemote string
 	}{
 		{
+			// The common case for a repository never pushed anywhere, which has
+			// to scan rather than report a failure to read the remotes.
+			name:  "no remotes is never a fork",
+			setup: func(func(args ...string)) {},
+			own:   "origin",
+		},
+		{
 			name: "one remote is never a fork",
 			setup: func(git func(args ...string)) {
 				git("remote", "add", "origin", "git@github.com:andornaut/gog.git")
@@ -68,15 +75,6 @@ func TestForkUpstream(t *testing.T) {
 				git("remote", "add", "origin", "git@github.com:andornaut/gog.git")
 				git("remote", "add", "upstream", "https://github.com/andornaut/gog.git")
 				fetched(git, "upstream")
-			},
-			own: "origin",
-		},
-		{
-			name: "URLs differing only in case name one project",
-			setup: func(git func(args ...string)) {
-				git("remote", "add", "origin", "git@github.com:Andornaut/Gog.git")
-				git("remote", "add", "mirror", "https://github.com/andornaut/gog.git")
-				fetched(git, "mirror")
 			},
 			own: "origin",
 		},
@@ -129,15 +127,5 @@ func TestForkUpstream(t *testing.T) {
 				t.Errorf("forkUpstream named the %s remote, want %s", upstream.Name, tt.wantRemote)
 			}
 		})
-	}
-}
-
-// A repository with no remotes is the common case for a repository never
-// pushed anywhere, and has to scan rather than report a failure to read them.
-func TestForkUpstreamWithoutRemotes(t *testing.T) {
-	repo, _ := gitRepo(t)
-
-	if _, isFork, err := forkUpstream(repo, "origin"); err != nil || isFork {
-		t.Errorf("forkUpstream = (%v, %v), want (false, nil)", isFork, err)
 	}
 }

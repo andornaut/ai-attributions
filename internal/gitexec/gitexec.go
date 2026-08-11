@@ -12,13 +12,11 @@ import (
 	"strings"
 )
 
-// Repo is a git repository on disk.
 type Repo struct {
 	dir string
 }
 
-// Commit is a commit, its full message including the subject line, and the two
-// identities it carries.
+// Commit carries the full message, subject line included, and both identities.
 type Commit struct {
 	Hash           string
 	Message        string
@@ -28,7 +26,6 @@ type Commit struct {
 	CommitterEmail string
 }
 
-// Subject returns the first line of the commit message.
 func (c Commit) Subject() string {
 	if i := strings.IndexByte(c.Message, '\n'); i >= 0 {
 		return c.Message[:i]
@@ -36,7 +33,6 @@ func (c Commit) Subject() string {
 	return c.Message
 }
 
-// Short returns an abbreviated commit hash.
 func (c Commit) Short() string {
 	if len(c.Hash) > 12 {
 		return c.Hash[:12]
@@ -44,7 +40,6 @@ func (c Commit) Short() string {
 	return c.Hash
 }
 
-// Open returns the repository rooted at or above dir.
 func Open(dir string) (*Repo, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -60,10 +55,8 @@ func Open(dir string) (*Repo, error) {
 	return repo, nil
 }
 
-// Dir returns the path the repository was opened at.
 func (r *Repo) Dir() string { return r.dir }
 
-// Output runs git and returns its standard output.
 func (r *Repo) Output(args ...string) (string, error) {
 	out, _, err := r.output(args...)
 	return out, err
@@ -92,8 +85,6 @@ func (r *Repo) output(args ...string) (string, int, error) {
 	return stdout.String(), 0, nil
 }
 
-// CombinedOutput runs git and returns its standard output and standard error
-// together, for commands whose output is only worth showing when they fail.
 func (r *Repo) CombinedOutput(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
@@ -104,8 +95,7 @@ func (r *Repo) CombinedOutput(args ...string) (string, error) {
 	return string(out), nil
 }
 
-// Run runs git with its output attached to the current process, for commands
-// whose progress the user should see.
+// Run attaches git's output to the current process, so its progress is visible.
 func (r *Repo) Run(args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
@@ -167,7 +157,7 @@ func (r *Repo) Commits(refs []string) ([]Commit, error) {
 }
 
 // CommitsNotIn returns the commits reachable from ref but not from any of
-// exclude, which is what a branch holds that the refs beside it do not.
+// exclude.
 func (r *Repo) CommitsNotIn(exclude []string, ref string) ([]Commit, error) {
 	args := append([]string{"log", "-z", commitFormat, ref, "--not"}, exclude...)
 	return r.parseCommits(args)
@@ -201,7 +191,7 @@ func (r *Repo) parseCommits(args []string) ([]Commit, error) {
 }
 
 // Graph returns every commit reachable from ref followed by its parents, newest
-// first, which is enough to work out which commits a rewrite moves.
+// first.
 func (r *Repo) Graph(ref string) ([][]string, error) {
 	out, err := r.Output("rev-list", "--topo-order", "--parents", ref)
 	if err != nil {
@@ -231,7 +221,7 @@ func (r *Repo) RemoteRefs(remote string) ([]string, error) {
 	return refs, nil
 }
 
-// Describe returns a commit's date and subject, for naming it in a report.
+// Describe returns a commit's date and subject.
 func (r *Repo) Describe(hash string) string {
 	out, err := r.Output("log", "-1", "--format=%cs %s", hash)
 	if err != nil {
@@ -255,7 +245,6 @@ func (r *Repo) UpdateRef(hash, ref string) error {
 	return err
 }
 
-// Remote is a configured remote and the project its URL points at.
 type Remote struct {
 	Name    string
 	URL     string
@@ -268,10 +257,9 @@ type Remote struct {
 func (r *Repo) Remotes() ([]Remote, error) {
 	out, status, err := r.output("config", "--get-regexp", `^remote\..*\.url$`)
 	if err != nil {
-		// git config exits 1 when the pattern matches nothing, which for this
-		// pattern is a repository with no remotes. Any other status is a
-		// failure to read the configuration, which the caller has to hear
-		// about rather than read as "no remotes".
+		// git config exits 1 when the pattern matches nothing, which here is a
+		// repository with no remotes. Any other status is a failure to read the
+		// configuration, not an absence of remotes.
 		if status == 1 {
 			return nil, nil
 		}
@@ -306,8 +294,7 @@ func project(url string) string {
 	if _, after, found := strings.Cut(rest, "://"); found {
 		rest, hasScheme = after, true
 	}
-	// Either form may carry a user, which names who connects rather than what
-	// is connected to.
+	// A user names who connects, not what is connected to.
 	if _, after, found := strings.Cut(rest, "@"); found {
 		rest = after
 	}
@@ -342,7 +329,6 @@ func isPort(s string) bool {
 	return true
 }
 
-// HasRemote reports whether the named remote is configured.
 func (r *Repo) HasRemote(name string) bool {
 	out, err := r.Output("remote")
 	if err != nil {

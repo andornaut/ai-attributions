@@ -37,7 +37,6 @@ if _change is not None:
             setattr(commit, _field, _value.encode())
 `
 
-// CheckAvailable reports whether git-filter-repo is installed.
 func CheckAvailable() error {
 	cmd := exec.Command("git", "filter-repo", "--version")
 	if err := cmd.Run(); err != nil {
@@ -54,7 +53,7 @@ func Run(repo *gitexec.Repo, refs []string, changes map[string]Change) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(mapFile)
+	defer func() { _ = os.Remove(mapFile) }()
 
 	quotedPath, err := json.Marshal(mapFile)
 	if err != nil {
@@ -68,8 +67,7 @@ func Run(repo *gitexec.Repo, refs []string, changes map[string]Change) error {
 	args = append(args, "--commit-callback", fmt.Sprintf(callbackTemplate, quotedPath))
 
 	// git-filter-repo writes its progress with a bare carriage return, which
-	// runs its lines together when it is not on a terminal. Its output is only
-	// worth showing when it fails.
+	// runs its lines together when it is not on a terminal.
 	if out, err := repo.CombinedOutput(args...); err != nil {
 		return fmt.Errorf("%w\n%s", err, out)
 	}
@@ -81,10 +79,10 @@ func writeMapFile(changes map[string]Change) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if err := json.NewEncoder(file).Encode(changes); err != nil {
-		os.Remove(file.Name())
+		_ = os.Remove(file.Name())
 		return "", err
 	}
 	return file.Name(), nil

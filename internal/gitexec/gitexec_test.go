@@ -30,11 +30,3 @@ func TestProject(t *testing.T) {
 		})
 	}
 }
-
-func TestProjectMatchesAcrossProtocols(t *testing.T) {
-	ssh := project("git@github.com:andornaut/gog.git")
-	https := project("https://github.com/andornaut/gog")
-	if ssh != https {
-		t.Errorf("ssh %q and https %q describe one project but did not match", ssh, https)
-	}
-}

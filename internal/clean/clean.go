@@ -14,7 +14,6 @@ type Options struct {
 	Emdashes bool
 }
 
-// LineChange records a line that was rewritten in place.
 type LineChange struct {
 	Old string
 	New string
@@ -26,7 +25,6 @@ type Findings struct {
 	ChangedLines []LineChange
 }
 
-// Empty reports whether the message is left untouched.
 func (f Findings) Empty() bool {
 	return len(f.RemovedLines) == 0 && len(f.ChangedLines) == 0
 }
@@ -36,10 +34,8 @@ var (
 	// vendor, and so are evidence on their own.
 	unambiguousAgent = regexp.MustCompile(`(?i)\b(claude|anthropic|chatgpt|openai|copilot|codeium|windsurf|aider|tabnine|codewhisperer)\b`)
 
-	// ambiguousAgent matches agent names that are also common human given
-	// names. These count only alongside a bot identity, a vendor domain, or a
-	// product word, so that a co-author named Devin or Jules is not mistaken
-	// for an agent.
+	// ambiguousAgent matches agent names that are also human given names. These
+	// count only alongside a bot identity, a vendor domain, or a product word.
 	ambiguousAgent = regexp.MustCompile(`(?i)\b(devin|jules|cursor|codex|gemini|amp)\b`)
 
 	// productContext matches the words that turn an ambiguous name into a
@@ -82,14 +78,9 @@ var attributionKeys = map[string]bool{
 	"signed-off-by":  true,
 }
 
-const dashClass = `[\x{2012}\x{2013}\x{2014}\x{2015}]`
-
-var (
-	trailingDashRe = regexp.MustCompile(`[ \t]*` + dashClass + `+[ \t]*$`)
-	leadingDashRe  = regexp.MustCompile(`^([ \t]*)` + dashClass + `+[ \t]+`)
-	spacedDashRe   = regexp.MustCompile(`(?:[ \t]+` + dashClass + `+[ \t]*|[ \t]*` + dashClass + `+[ \t]+)`)
-	bareDashRe     = regexp.MustCompile(dashClass + `+`)
-)
+// dashRe matches a run of emdashes, endashes, figure dashes and horizontal
+// bars, which is what a rewrite replaces with a hyphen.
+var dashRe = regexp.MustCompile(`[\x{2012}\x{2013}\x{2014}\x{2015}]+`)
 
 // Message returns msg with the selected transformations applied.
 func Message(opts Options, msg string) string {
@@ -110,8 +101,6 @@ func apply(opts Options, msg string) (string, Findings) {
 	hadNewline := len(body) < len(msg)
 	lines := strings.Split(body, "\n")
 
-	blanked := false
-
 	if opts.Trailers {
 		kept := make([]string, 0, len(lines))
 		for i, line := range lines {
@@ -130,19 +119,15 @@ func apply(opts Options, msg string) (string, Findings) {
 		for i, line := range lines {
 			replaced := replaceDashes(line)
 			if replaced != line {
-				if strings.TrimSpace(replaced) == "" {
-					blanked = true
-				}
 				findings.ChangedLines = append(findings.ChangedLines, LineChange{Old: line, New: replaced})
 				lines[i] = replaced
 			}
 		}
 	}
 
-	// Collapsed once, after both passes, since removing a trailer block and
-	// emptying a line that held only a dash both leave gaps behind. Messages
-	// that neither pass touched keep their original spacing.
-	if len(findings.RemovedLines) > 0 || blanked {
+	// A dash pass replaces rather than removes, so only a dropped trailer can
+	// leave a gap. A message nothing touched keeps its original spacing.
+	if len(findings.RemovedLines) > 0 {
 		lines = collapseBlanks(lines)
 	}
 
@@ -170,8 +155,7 @@ func isAttribution(line string) bool {
 }
 
 // Identity reports whether a commit's name and address identify an AI agent
-// rather than a person. It is the same test applied to attribution trailers,
-// which carry an identity in the same shape.
+// rather than a person. It is the same test applied to attribution trailers.
 func Identity(name, address string) bool {
 	return namesAgent(name + " <" + address + ">")
 }
@@ -180,9 +164,9 @@ func Identity(name, address string) bool {
 // The display name and the address are weighed separately so that a vendor name
 // appearing in an unrelated hostname is not taken as evidence.
 //
-// A bot account is not evidence on its own. dependabot, renovate and
-// github-actions are bots that no agent wrote, and re-attributing their commits
-// would misstate who wrote them, so an account has to name an agent as well.
+// A bot account is not evidence on its own: dependabot, renovate and
+// github-actions are bots that no agent wrote, so an account has to name an
+// agent as well.
 func namesAgent(value string) bool {
 	name, address := splitIdentity(value)
 	local, host, _ := strings.Cut(address, "@")
@@ -213,8 +197,8 @@ func mentionsAgent(text string) bool {
 	return ambiguousAgent.MatchString(text) && productContext.MatchString(text)
 }
 
-// hostRunes keeps the characters a hostname can hold and blanks the rest, so
-// that a host embedded in a URL or in markup can be matched on its own.
+// hostRunes keeps the characters a hostname can hold and blanks the rest, so a
+// host embedded in a URL or in markup can be matched on its own.
 func hostRunes(r rune) rune {
 	switch {
 	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
@@ -225,8 +209,8 @@ func hostRunes(r rune) rune {
 	return ' '
 }
 
-// splitIdentity separates "Display Name <local@host>" into its two parts. A
-// value without an address is all display name.
+// splitIdentity separates "Display Name <local@host>". A value without an
+// address is all display name.
 func splitIdentity(value string) (name, address string) {
 	if m := identityRe.FindStringSubmatch(value); m != nil {
 		return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
@@ -235,7 +219,7 @@ func splitIdentity(value string) (name, address string) {
 }
 
 // collapseBlanks removes trailing blank lines and reduces runs of blank lines
-// to one, so that removing a trailer block does not leave a gap behind.
+// to one.
 func collapseBlanks(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -251,14 +235,13 @@ func collapseBlanks(lines []string) []string {
 	return out
 }
 
-// replaceDashes rewrites emdashes, endashes, and their relatives. A spaced dash
-// introducing a clause becomes a colon, a spaced dash used parenthetically (two
-// or more on the line) becomes a comma, and a dash joining two words or numbers
-// becomes a hyphen. URLs are masked first, since a dash inside one is part of
-// the address.
+// replaceDashes rewrites emdashes, endashes, and their relatives as hyphens,
+// whatever the dash is doing: a run of them is one hyphen, and the spacing
+// around it is left as it was. URLs are masked first, since a dash inside one
+// is part of the address rather than punctuation.
 func replaceDashes(line string) string {
 	line, urls := maskURLs(line)
-	return unmaskURLs(replaceLineDashes(line), urls)
+	return unmaskURLs(dashRe.ReplaceAllString(line, "-"), urls)
 }
 
 // urlMark brackets a masked URL. NUL cannot appear in a commit message, so the
@@ -281,31 +264,4 @@ func unmaskURLs(line string, urls []string) string {
 		line = strings.Replace(line, urlMark+strconv.Itoa(i)+urlMark, url, 1)
 	}
 	return line
-}
-
-func replaceLineDashes(line string) string {
-	line = trailingDashRe.ReplaceAllString(line, "")
-	line = leadingDashRe.ReplaceAllString(line, "${1}- ")
-
-	spans := spacedDashRe.FindAllStringIndex(line, -1)
-	if len(spans) > 0 {
-		// A single dash reads as a clause introduction, unless the line
-		// already uses a colon and a second one would be confusing.
-		replacement := ", "
-		if len(spans) == 1 && !strings.Contains(line, ":") {
-			replacement = ": "
-		}
-
-		var b strings.Builder
-		prev := 0
-		for _, span := range spans {
-			b.WriteString(line[prev:span[0]])
-			b.WriteString(replacement)
-			prev = span[1]
-		}
-		b.WriteString(line[prev:])
-		line = b.String()
-	}
-
-	return bareDashRe.ReplaceAllString(line, "-")
 }
