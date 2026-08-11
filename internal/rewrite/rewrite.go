@@ -10,18 +10,31 @@ import (
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
+// Change is the replacement content for one commit. An empty field leaves what
+// the commit already carries in place.
+type Change struct {
+	Message        string `json:"message,omitempty"`
+	AuthorName     string `json:"author_name,omitempty"`
+	AuthorEmail    string `json:"author_email,omitempty"`
+	CommitterName  string `json:"committer_name,omitempty"`
+	CommitterEmail string `json:"committer_email,omitempty"`
+}
+
 // callbackTemplate is the body of a git-filter-repo --commit-callback. It looks
 // each commit up by its pre-rewrite hash in a map written by this program, so
-// that every message decision is made in Go rather than duplicated in Python.
+// that every decision is made in Go rather than duplicated in Python.
 const callbackTemplate = `
 import json
 _cache = globals()
 if "_ai_attributions" not in _cache:
     with open(%s) as _f:
         _cache["_ai_attributions"] = json.load(_f)
-_replacement = _cache["_ai_attributions"].get(commit.original_id.decode())
-if _replacement is not None:
-    commit.message = _replacement.encode()
+_change = _cache["_ai_attributions"].get(commit.original_id.decode())
+if _change is not None:
+    for _field in ("message", "author_name", "author_email", "committer_name", "committer_email"):
+        _value = _change.get(_field)
+        if _value is not None:
+            setattr(commit, _field, _value.encode())
 `
 
 // CheckAvailable reports whether git-filter-repo is installed.
@@ -33,11 +46,11 @@ func CheckAvailable() error {
 	return nil
 }
 
-// Run rewrites the given refs so that each commit named in messages carries its
-// replacement message. Every other commit keeps its message, though rewriting
+// Run rewrites the given refs so that each commit named in changes carries its
+// replacement content. Every other commit keeps what it has, though rewriting
 // an ancestor still changes the hashes of its descendants.
-func Run(repo *gitexec.Repo, refs []string, messages map[string]string) error {
-	mapFile, err := writeMapFile(messages)
+func Run(repo *gitexec.Repo, refs []string, changes map[string]Change) error {
+	mapFile, err := writeMapFile(changes)
 	if err != nil {
 		return err
 	}
@@ -54,17 +67,23 @@ func Run(repo *gitexec.Repo, refs []string, messages map[string]string) error {
 	args = append(args, refs...)
 	args = append(args, "--commit-callback", fmt.Sprintf(callbackTemplate, quotedPath))
 
-	return repo.Run(args...)
+	// git-filter-repo writes its progress with a bare carriage return, which
+	// runs its lines together when it is not on a terminal. Its output is only
+	// worth showing when it fails.
+	if out, err := repo.CombinedOutput(args...); err != nil {
+		return fmt.Errorf("%w\n%s", err, out)
+	}
+	return nil
 }
 
-func writeMapFile(messages map[string]string) (string, error) {
+func writeMapFile(changes map[string]Change) (string, error) {
 	file, err := os.CreateTemp("", "ai-attributions-*.json")
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	if err := json.NewEncoder(file).Encode(messages); err != nil {
+	if err := json.NewEncoder(file).Encode(changes); err != nil {
 		os.Remove(file.Name())
 		return "", err
 	}

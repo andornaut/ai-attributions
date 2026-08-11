@@ -16,10 +16,15 @@ type Repo struct {
 	dir string
 }
 
-// Commit is a commit and its full message, including the subject line.
+// Commit is a commit, its full message including the subject line, and the two
+// identities it carries.
 type Commit struct {
-	Hash    string
-	Message string
+	Hash           string
+	Message        string
+	AuthorName     string
+	AuthorEmail    string
+	CommitterName  string
+	CommitterEmail string
 }
 
 // Subject returns the first line of the commit message.
@@ -74,6 +79,18 @@ func (r *Repo) Output(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// CombinedOutput runs git and returns its standard output and standard error
+// together, for commands whose output is only worth showing when they fail.
+func (r *Repo) CombinedOutput(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
 // Run runs git with its output attached to the current process, for commands
 // whose progress the user should see.
 func (r *Repo) Run(args ...string) error {
@@ -126,9 +143,24 @@ func (r *Repo) IsClean() (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+// commitFormat separates the fixed fields with a unit separator, so that a name
+// holding a newline cannot be mistaken for the start of the message.
+const commitFormat = "--format=%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%B"
+
 // Commits returns every commit reachable from refs, newest first.
 func (r *Repo) Commits(refs []string) ([]Commit, error) {
-	args := append([]string{"log", "-z", "--format=%H%n%B"}, refs...)
+	args := append([]string{"log", "-z", commitFormat}, refs...)
+	return r.parseCommits(args)
+}
+
+// CommitsNotIn returns the commits reachable from ref but not from any of
+// exclude, which is what a branch holds that the refs beside it do not.
+func (r *Repo) CommitsNotIn(exclude []string, ref string) ([]Commit, error) {
+	args := append([]string{"log", "-z", commitFormat, ref, "--not"}, exclude...)
+	return r.parseCommits(args)
+}
+
+func (r *Repo) parseCommits(args []string) ([]Commit, error) {
 	out, err := r.Output(args...)
 	if err != nil {
 		return nil, err
@@ -139,13 +171,69 @@ func (r *Repo) Commits(refs []string) ([]Commit, error) {
 		if record == "" {
 			continue
 		}
-		hash, message, found := strings.Cut(record, "\n")
-		if !found {
+		fields := strings.SplitN(record, "\x1f", 6)
+		if len(fields) < 6 {
 			continue
 		}
-		commits = append(commits, Commit{Hash: hash, Message: message})
+		commits = append(commits, Commit{
+			Hash:           fields[0],
+			AuthorName:     fields[1],
+			AuthorEmail:    fields[2],
+			CommitterName:  fields[3],
+			CommitterEmail: fields[4],
+			Message:        fields[5],
+		})
 	}
 	return commits, nil
+}
+
+// Graph returns every commit reachable from ref followed by its parents, newest
+// first, which is enough to work out which commits a rewrite moves.
+func (r *Repo) Graph(ref string) ([][]string, error) {
+	out, err := r.Output("rev-list", "--topo-order", "--parents", ref)
+	if err != nil {
+		return nil, err
+	}
+	var graph [][]string
+	for line := range strings.SplitSeq(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			graph = append(graph, strings.Fields(line))
+		}
+	}
+	return graph, nil
+}
+
+// RemoteRefs returns the remote-tracking refs for a remote, excluding its HEAD.
+func (r *Repo) RemoteRefs(remote string) ([]string, error) {
+	out, err := r.Output("for-each-ref", "--format=%(refname)", "refs/remotes/"+remote)
+	if err != nil {
+		return nil, err
+	}
+	var refs []string
+	for _, ref := range nonEmptyLines(out) {
+		if !strings.HasSuffix(ref, "/HEAD") {
+			refs = append(refs, ref)
+		}
+	}
+	return refs, nil
+}
+
+// Describe returns a commit's date and subject, for naming it in a report.
+func (r *Repo) Describe(hash string) string {
+	out, err := r.Output("log", "-1", "--format=%cs %s", hash)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// Config returns a git configuration value, or an empty string when it is unset.
+func (r *Repo) Config(key string) string {
+	out, err := r.Output("config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // UpdateRef points ref at hash.

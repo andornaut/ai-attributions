@@ -211,6 +211,32 @@ func TestInspect(t *testing.T) {
 	}
 }
 
+func TestIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		want    bool
+	}{
+		{"Claude", "noreply@anthropic.com", true},
+		{"Claude Opus 5", "noreply@anthropic.com", true},
+		{"Cursor Agent", "cursoragent@cursor.com", true},
+		{"google-labs-jules[bot]", "jules@users.noreply.github.com", true},
+		{"Copilot", "copilot@github.com", true},
+		{"andornaut", "andornaut@users.noreply.github.com", false},
+		{"Devin Smith", "devin@example.com", false},
+		{"Jules Verne", "jules@example.com", false},
+		{"Ada", "ada@openai-research.example.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Identity(tt.name, tt.address); got != tt.want {
+				t.Errorf("Identity(%q, %q) = %v, want %v", tt.name, tt.address, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestInspectEmptyOnCleanMessage(t *testing.T) {
 	if !Inspect(both, "fix(api): reject empty payloads\n").Empty() {
 		t.Error("Inspect() reported findings for a clean message")

@@ -169,6 +169,13 @@ func isAttribution(line string) bool {
 	return generatedFooterRe.MatchString(line) && mentionsAgent(line)
 }
 
+// Identity reports whether a commit's name and address identify an AI agent
+// rather than a person. It is the same test applied to attribution trailers,
+// which carry an identity in the same shape.
+func Identity(name, address string) bool {
+	return namesAgent(name + " <" + address + ">")
+}
+
 // namesAgent reports whether a trailer value identifies an AI agent rather than
 // a person. The display name and the address are weighed separately so that a
 // vendor name appearing in an unrelated hostname is not taken as evidence.

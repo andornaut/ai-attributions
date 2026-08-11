@@ -1,28 +1,37 @@
 # ai-attributions
 
-Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the emdashes that AI-written commit messages leave behind.
+Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the emdashes that AI-written commit messages leave behind, and the agent identities on the commits themselves.
 
 ```console
-$ ai-attributions -dry-run ~/src/example
-090a3502fff0 refactor the read—write split
-    - 🤖 Generated with [Claude Code](https://claude.ai/code)
-    - Co-Authored-By: Claude <noreply@anthropic.com>
-    - Claude-Session: https://claude.ai/chat/abc123
-    - refactor the read—write split
-    + refactor the read-write split
-33c0e3e3e6a7 feat(parser): accept empty payloads
-    - Co-Authored-By: Claude <noreply@anthropic.com>
-    - The handler assumed a body — it did not always get one.
-    + The handler assumed a body: it did not always get one.
+$ ai-attributions ~/src/example
+2 of 4 commits carry AI attributions, across refs/heads/main
 
-2 of 4 commits need rewriting, across refs/heads/main
-dry run: nothing was rewritten
+removed lines
+     2  Co-Authored-By: Claude <noreply@anthropic.com>
+     1  Claude-Session: https://claude.ai/code/session_01abc
+
+identities
+     1  author Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
+     1  committer Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
+
+emdash rewrites
+     2  lines
+
+pass -verbose to list the commits behind these counts
+
+refs/heads/main: 3 of 4 commits will change hash, starting at b8f132701d4f 2026-08-11 feat(parser): accept empty payloads
+
+remote branches carrying attributions that are not in scope
+     1 of 1 commits  refs/remotes/origin/agent-work
+check one out to rewrite it: git switch -c <name> origin/<name>
+
+nothing was rewritten. Pass -apply to rewrite the history
 ```
 
-It scans the commit messages in scope, prints what it will change, rewrites the history with [git-filter-repo](https://github.com/newren/git-filter-repo), and force pushes only when asked.
+Scanning is what it does by default. `-apply` rewrites the history with [git-filter-repo](https://github.com/newren/git-filter-repo), and `-push` publishes it.
 
 > [!IMPORTANT]
-> Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history.
+> Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history. The count is printed before anything is rewritten.
 
 ## What it removes
 
@@ -59,6 +68,14 @@ A line is dropped when the line itself is the statement that an agent produced t
 
 Body prose that mentions an agent in passing is left alone, so `The changelog is generated with Copilot from the commit log.` survives.
 
+### Identities
+
+A trailer is not the only place an agent is named. A commit whose author or committer is an agent is re-attributed to the repository's `user.name` and `user.email`, which `-identity "Name <email>"` overrides and `-no-identity` turns off.
+
+This is the half that GitHub reads. The contributor list on a repository is built from commit authorship, not from trailers, so stripping trailers alone leaves the agent listed as a contributor.
+
+The same test decides an identity as decides a trailer, so a committer named Devin Smith is left alone for the same reason a co-author is.
+
 ### Emdashes
 
 Emdashes, endashes, figure dashes and horizontal bars are replaced by what the dash is doing.
@@ -76,7 +93,7 @@ The subject line is never dropped, only rewritten, so no commit is left without 
 
 ## How it works
 
-Every decision about a message is made in Go. The rewrite writes a map of original commit hash to new message, then hands `git-filter-repo` a callback that looks each commit up by `commit.original_id` and assigns the replacement. Nothing is reimplemented in the callback, so what the scan prints is what gets written.
+Every decision is made in Go. The rewrite writes a map of original commit hash to replacement fields, then hands `git-filter-repo` a callback that looks each commit up by `commit.original_id` and assigns them. Nothing is reimplemented in the callback, so what the scan prints is what gets written.
 
 `--partial` scopes the run to the named refs, which is why remotes and remote-tracking refs are left in place.
 
@@ -86,7 +103,7 @@ Every decision about a message is made in Go. The rewrite writes a map of origin
 go install github.com/andornaut/ai-attributions@latest
 ```
 
-`git-filter-repo` has to be on `PATH` for the rewrite. The scan and `-dry-run` work without it.
+`git-filter-repo` has to be on `PATH` for `-apply`. Scanning and `-check` work without it.
 
 ```bash
 pip install --user git-filter-repo   # or: apt install git-filter-repo
@@ -98,44 +115,56 @@ pip install --user git-filter-repo   # or: apt install git-filter-repo
 $ ai-attributions --help
 usage: ai-attributions [flags] [repo-path]
 
-Rewrites the commit messages of the current branch, dropping AI attribution
-trailers and normalizing emdashes. repo-path defaults to the current directory.
+Scans the commit messages and identities of the current branch for AI
+attributions and reports what it would change. Nothing is rewritten without
+-apply. repo-path defaults to the current directory.
 
 flags:
   -all
-    	rewrite every local branch and tag, not just the current branch
-  -dry-run
-    	report what would change without rewriting anything
+    	scan every local branch and tag, not just the current branch
+  -apply
+    	rewrite the history; without this nothing is changed
+  -check
+    	exit non-zero when attributions are found
+  -exclude value
+    	skip refs matching this glob (repeatable)
+  -identity string
+    	identity to put on agent-authored commits (default: the repository's user.name and user.email)
+  -list-backups
+    	list the saved pre-rewrite refs, then exit
   -no-backup
     	skip saving the pre-rewrite refs under refs/ai-attributions-backup/
   -no-emdashes
     	leave emdashes alone
+  -no-identity
+    	leave agent author and committer identities alone
   -no-trailers
     	leave attribution trailers and footers alone
   -push
-    	force push the rewritten refs after a successful rewrite
+    	force push the rewritten refs; requires -apply
   -remote string
     	remote to push to (default "origin")
+  -restore string
+    	restore the refs saved under this backup timestamp, then exit
+  -verbose
+    	report every commit rather than a summary
+  -version
+    	print the version, then exit
 ```
-
-Without flags, the current branch is scanned and rewritten and nothing is pushed.
 
 ```bash
-ai-attributions -dry-run ~/src/example    # report only
-ai-attributions ~/src/example             # rewrite the current branch
-ai-attributions -all -push ~/src/example  # rewrite every branch and tag, then push
+ai-attributions ~/src/example                    # report only
+ai-attributions -verbose ~/src/example           # report, commit by commit
+ai-attributions -apply ~/src/example             # rewrite the current branch
+ai-attributions -all -apply -push ~/src/example  # rewrite every branch and tag, then push
 ```
 
-A rewrite reports where each ref moved, and prints the push it did not run:
+A rewrite reports where each ref moved and prints the push it did not run:
 
 ```console
-$ ai-attributions ~/src/example
-87edff378fc6 feat(parser): accept empty payloads
-    - Co-Authored-By: Claude <noreply@anthropic.com>
-
-1 of 3 commits need rewriting, across refs/heads/main
+$ ai-attributions -apply ~/src/example
+...
 saved the pre-rewrite refs under refs/ai-attributions-backup/20260811T052635Z/
-[git-filter-repo progress]
 
 refs/heads/main cb44f5294958 -> 4e85ec3c65bc
 
@@ -144,18 +173,44 @@ not pushed. To publish the rewrite:
     git push origin --force-with-lease=refs/heads/main:cb44f5294958d994f1638fe065a9cae4cfcdd5f7 refs/heads/main:refs/heads/main
 ```
 
+### Excluding refs
+
+`-exclude` takes a glob, is repeatable, and matches either the full ref or its short name. A tag a release workflow owns should not be rewritten by hand:
+
+```bash
+ai-attributions -all -exclude dev -exclude 'release/*' -apply ~/src/example
+```
+
+### Catching them before they land
+
+Rewriting published history is the expensive fix. `-check` reports and exits non-zero, which is what a CI job or a pre-push hook wants:
+
+```bash
+ai-attributions -check || exit 1
+```
+
+### Remote branches
+
+The scan reads `refs/remotes/<remote>/*` and names any branch carrying attributions that the refs in scope do not cover, which is where the branches an agent pushed and you never checked out show up. It reports them and stops there. Rewriting one means checking it out first, so the tool never force pushes a ref it was not pointed at.
+
+It reads remote-tracking refs rather than the remote, so a scan needs no network. The cost is that a branch deleted upstream is still listed until `git fetch --prune` clears it, which the report says.
+
 ## Safety
 
-Nothing is rewritten while tracked files have uncommitted changes. Untracked files do not count, since they cannot affect a message-only rewrite.
+Nothing is rewritten without `-apply`, and nothing is rewritten while tracked files have uncommitted changes. Untracked files do not count, since they cannot affect a rewrite of this kind.
 
 The pre-rewrite refs are saved under `refs/ai-attributions-backup/<timestamp>/`, which `-no-backup` turns off.
 
-```bash
-# Put a branch back
-git update-ref refs/heads/main refs/ai-attributions-backup/<timestamp>/heads/main
+```console
+$ ai-attributions -list-backups
+20260811T054927Z  refs/heads/main  812479b
 
-# Throw the backups away
-git for-each-ref --format='%(refname)' refs/ai-attributions-backup | xargs -n1 git update-ref -d
+restore one run with: ai-attributions -restore <timestamp>
+
+$ ai-attributions -restore 20260811T054927Z
+refs/heads/main -> 812479bfcbdf
+
+restored. A published rewrite still needs a force push to undo on the remote
 ```
 
 A branch is pushed with `--force-with-lease` against its remote-tracking ref, which holds what the remote had at the last fetch. A remote that has moved since then rejects the push instead of losing the work, and unpushed local commits do not get in the way. A ref with no remote-tracking counterpart, a tag for instance, has no observed remote value to compare against, so it is forced; those refs are named in the output rather than forced quietly.
@@ -164,9 +219,9 @@ A commit whose message is not valid UTF-8 is reported and skipped, because rewri
 
 ## Limitations
 
-- Only commit messages are rewritten. File contents are untouched.
+- Only commit messages and identities are rewritten. File contents are untouched.
 - Annotated tag messages are not scanned, though tags are repointed at the rewritten commits.
-- Commits reachable only from a remote-tracking ref or a stash are out of scope.
+- Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported either.
 - GPG signatures are dropped across the rewritten range. `git-filter-repo` works through `git fast-export`, which does not carry the `gpgsig` header. Rewriting a message invalidates that commit's signature anyway, but commits whose messages did not change lose theirs too.
 
 ## Developing
@@ -178,4 +233,4 @@ go test ./...
 go build .
 ```
 
-The message transforms are pure functions in [`internal/clean`](./internal/clean) and carry the test suite. [`internal/gitexec`](./internal/gitexec) wraps the git commands, and [`internal/rewrite`](./internal/rewrite) drives `git-filter-repo`.
+The message and identity tests are pure functions in [`internal/clean`](./internal/clean) and carry the test suite. [`internal/gitexec`](./internal/gitexec) wraps the git commands, [`internal/rewrite`](./internal/rewrite) drives `git-filter-repo`, and [`scan.go`](./scan.go) turns a walk of the history into the report.

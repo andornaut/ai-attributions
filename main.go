@@ -1,15 +1,19 @@
 // Command ai-attributions removes AI attributions from a repository's git
-// history: co-author and session trailers, "generated with" footers, and the
-// emdashes that AI-written commit messages tend to leave behind.
+// history: co-author and session trailers, "generated with" footers, the
+// emdashes that AI-written commit messages leave behind, and the agent
+// identities on the commits themselves.
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/andornaut/ai-attributions/internal/clean"
 	"github.com/andornaut/ai-attributions/internal/gitexec"
@@ -18,20 +22,34 @@ import (
 
 const usage = `usage: ai-attributions [flags] [repo-path]
 
-Rewrites the commit messages of the current branch, dropping AI attribution
-trailers and normalizing emdashes. repo-path defaults to the current directory.
+Scans the commit messages and identities of the current branch for AI
+attributions and reports what it would change. Nothing is rewritten without
+-apply. repo-path defaults to the current directory.
 
 flags:
 `
 
+const backupPrefix = "refs/ai-attributions-backup/"
+
+// errFound reports attributions to the caller of -check without printing.
+var errFound = errors.New("attributions found")
+
 type config struct {
-	all        bool
-	dryRun     bool
-	push       bool
-	remote     string
-	noBackup   bool
-	noTrailers bool
-	noEmdashes bool
+	all         bool
+	apply       bool
+	check       bool
+	exclude     refPatterns
+	identity    string
+	listBackups bool
+	noBackup    bool
+	noEmdashes  bool
+	noIdentity  bool
+	noTrailers  bool
+	push        bool
+	remote      string
+	restore     string
+	verbose     bool
+	version     bool
 }
 
 // target is a ref to rewrite, the commit it pointed at beforehand, and the
@@ -43,53 +61,60 @@ type target struct {
 	lease string
 }
 
+// identity is the name and address to put on a commit an agent authored.
+type identity struct {
+	name    string
+	address string
+}
+
+func (i identity) String() string { return i.name + " <" + i.address + ">" }
+
+// refPatterns collects the repeatable -exclude flag.
+type refPatterns []string
+
+func (p *refPatterns) String() string     { return strings.Join(*p, ",") }
+func (p *refPatterns) Set(v string) error { *p = append(*p, v); return nil }
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-attributions: %v\n", err)
+		if !errors.Is(err, errFound) {
+			fmt.Fprintf(os.Stderr, "ai-attributions: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
 
 func run(argv []string) error {
-	var cfg config
-	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
-	flags.BoolVar(&cfg.all, "all", false, "rewrite every local branch and tag, not just the current branch")
-	flags.BoolVar(&cfg.dryRun, "dry-run", false, "report what would change without rewriting anything")
-	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs after a successful rewrite")
-	flags.StringVar(&cfg.remote, "remote", "origin", "remote to push to")
-	flags.BoolVar(&cfg.noBackup, "no-backup", false, "skip saving the pre-rewrite refs under refs/ai-attributions-backup/")
-	flags.BoolVar(&cfg.noTrailers, "no-trailers", false, "leave attribution trailers and footers alone")
-	flags.BoolVar(&cfg.noEmdashes, "no-emdashes", false, "leave emdashes alone")
-	flags.Usage = func() {
-		fmt.Fprint(flags.Output(), usage)
-		flags.PrintDefaults()
-	}
-	if err := flags.Parse(argv); err != nil {
+	cfg, path, err := parseFlags(argv)
+	if err != nil {
 		return err
 	}
-	if flags.NArg() > 1 {
-		return fmt.Errorf("expected at most one repo-path, got %d arguments", flags.NArg())
+	if cfg.version {
+		fmt.Println(version())
+		return nil
 	}
 
-	opts := clean.Options{Trailers: !cfg.noTrailers, Emdashes: !cfg.noEmdashes}
-	if !opts.Trailers && !opts.Emdashes {
-		return fmt.Errorf("-no-trailers and -no-emdashes together leave nothing to do")
-	}
-
-	path := "."
-	if flags.NArg() == 1 {
-		path = flags.Arg(0)
-	}
 	repo, err := gitexec.Open(path)
 	if err != nil {
 		return err
 	}
+	switch {
+	case cfg.listBackups:
+		return listBackups(repo)
+	case cfg.restore != "":
+		return restoreBackup(repo, cfg.restore)
+	}
 
-	refs, err := targetRefs(repo, cfg.all)
+	opts := clean.Options{Trailers: !cfg.noTrailers, Emdashes: !cfg.noEmdashes}
+	who, err := targetIdentity(repo, cfg)
 	if err != nil {
 		return err
 	}
 
+	refs, err := targetRefs(repo, cfg)
+	if err != nil {
+		return err
+	}
 	if len(refs) == 0 {
 		fmt.Println("no commits to inspect")
 		return nil
@@ -99,27 +124,158 @@ func run(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if len(commits) == 0 {
-		fmt.Println("no commits to inspect")
-		return nil
+	found := inspect(opts, who, commits)
+	found.report(cfg.verbose, refs)
+
+	if err := found.reportRadius(repo, refs); err != nil {
+		return err
+	}
+	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+		return err
 	}
 
-	messages, skipped := report(opts, commits)
-	fmt.Printf("\n%d of %d commits need rewriting, across %s\n",
-		len(messages), len(commits), strings.Join(refs, ", "))
-	if skipped == 1 {
-		fmt.Println("1 commit was skipped because its message is not valid UTF-8")
-	} else if skipped > 1 {
-		fmt.Printf("%d commits were skipped because their messages are not valid UTF-8\n", skipped)
-	}
-	if len(messages) == 0 {
+	if len(found.changes) == 0 {
 		return nil
 	}
-	if cfg.dryRun {
-		fmt.Println("dry run: nothing was rewritten")
+	if !cfg.apply {
+		fmt.Println("\nnothing was rewritten. Pass -apply to rewrite the history")
+		if cfg.check {
+			return errFound
+		}
 		return nil
+	}
+	return apply(repo, cfg, refs, found.changes)
+}
+
+func parseFlags(argv []string) (config, string, error) {
+	var cfg config
+	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
+	flags.BoolVar(&cfg.all, "all", false, "scan every local branch and tag, not just the current branch")
+	flags.BoolVar(&cfg.apply, "apply", false, "rewrite the history; without this nothing is changed")
+	flags.BoolVar(&cfg.check, "check", false, "exit non-zero when attributions are found")
+	flags.Var(&cfg.exclude, "exclude", "skip refs matching this glob (repeatable)")
+	flags.StringVar(&cfg.identity, "identity", "", "identity to put on agent-authored commits (default: the repository's user.name and user.email)")
+	flags.BoolVar(&cfg.listBackups, "list-backups", false, "list the saved pre-rewrite refs, then exit")
+	flags.BoolVar(&cfg.noBackup, "no-backup", false, "skip saving the pre-rewrite refs under "+backupPrefix)
+	flags.BoolVar(&cfg.noEmdashes, "no-emdashes", false, "leave emdashes alone")
+	flags.BoolVar(&cfg.noIdentity, "no-identity", false, "leave agent author and committer identities alone")
+	flags.BoolVar(&cfg.noTrailers, "no-trailers", false, "leave attribution trailers and footers alone")
+	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs; requires -apply")
+	flags.StringVar(&cfg.remote, "remote", "origin", "remote to push to")
+	flags.StringVar(&cfg.restore, "restore", "", "restore the refs saved under this backup timestamp, then exit")
+	flags.BoolVar(&cfg.verbose, "verbose", false, "report every commit rather than a summary")
+	flags.BoolVar(&cfg.version, "version", false, "print the version, then exit")
+	flags.Usage = func() {
+		fmt.Fprint(flags.Output(), usage)
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(argv); err != nil {
+		return cfg, "", err
 	}
 
+	switch {
+	case flags.NArg() > 1:
+		return cfg, "", fmt.Errorf("expected at most one repo-path, got %d arguments", flags.NArg())
+	case cfg.noTrailers && cfg.noEmdashes && cfg.noIdentity:
+		return cfg, "", fmt.Errorf("-no-trailers, -no-emdashes and -no-identity together leave nothing to do")
+	case cfg.push && !cfg.apply:
+		return cfg, "", fmt.Errorf("-push needs -apply; there is nothing to push until the history is rewritten")
+	case cfg.check && cfg.apply:
+		return cfg, "", fmt.Errorf("-check reports without changing anything, so it cannot be combined with -apply")
+	}
+
+	repoPath := "."
+	if flags.NArg() == 1 {
+		repoPath = flags.Arg(0)
+	}
+	return cfg, repoPath, nil
+}
+
+func version() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "devel"
+}
+
+// targetIdentity resolves who agent-authored commits are re-attributed to.
+func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
+	if cfg.noIdentity {
+		return identity{}, nil
+	}
+	if cfg.identity != "" {
+		name, address, found := strings.Cut(strings.TrimSuffix(cfg.identity, ">"), "<")
+		if !found {
+			return identity{}, fmt.Errorf("-identity should look like \"Name <email>\", got %q", cfg.identity)
+		}
+		return identity{name: strings.TrimSpace(name), address: strings.TrimSpace(address)}, nil
+	}
+
+	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email")}
+	if who.name == "" || who.address == "" {
+		return identity{}, fmt.Errorf("the repository has no user.name and user.email to re-attribute to; pass -identity or -no-identity")
+	}
+	return who, nil
+}
+
+// targetRefs returns the refs to scan and rewrite, or nothing when the
+// repository has no commits to walk.
+func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
+	var refs []string
+	if cfg.all {
+		found, err := repo.ListRefs()
+		if err != nil {
+			return nil, err
+		}
+		refs = found
+	} else {
+		branch, err := repo.CurrentBranch()
+		if err != nil {
+			return nil, err
+		}
+		// A branch with no commits yet is a valid symbolic ref that nothing
+		// resolves to, which git log cannot walk.
+		if _, err := repo.Resolve(branch); err != nil {
+			return nil, nil
+		}
+		refs = []string{branch}
+	}
+
+	var kept []string
+	for _, ref := range refs {
+		if excluded, err := cfg.exclude.matches(ref); err != nil {
+			return nil, err
+		} else if excluded {
+			fmt.Printf("excluding %s\n", ref)
+			continue
+		}
+		kept = append(kept, ref)
+	}
+	return kept, nil
+}
+
+// matches reports whether a ref is excluded, testing each pattern against both
+// the full ref and its short name, so that -exclude dev covers refs/tags/dev.
+func (p refPatterns) matches(ref string) (bool, error) {
+	short := ref
+	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
+		short = strings.TrimPrefix(short, prefix)
+	}
+	for _, pattern := range p {
+		for _, candidate := range []string{ref, short} {
+			matched, err := path.Match(pattern, candidate)
+			if err != nil {
+				return false, fmt.Errorf("bad -exclude pattern %q: %w", pattern, err)
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func apply(repo *gitexec.Repo, cfg config, refs []string, changes map[string]rewrite.Change) error {
 	if err := checkRewritable(repo, cfg); err != nil {
 		return err
 	}
@@ -127,7 +283,7 @@ func run(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if err := rewrite.Run(repo, refs, messages); err != nil {
+	if err := rewrite.Run(repo, refs, changes); err != nil {
 		return err
 	}
 	reportRewritten(repo, targets)
@@ -140,57 +296,6 @@ func run(argv []string) error {
 	fmt.Printf("\nnot pushed. To publish the rewrite:\n\n    git %s\n\n",
 		strings.Join(pushArgs(cfg.remote, targets), " "))
 	return nil
-}
-
-// targetRefs returns the refs to scan and rewrite, or nothing when the
-// repository has no commits to walk.
-func targetRefs(repo *gitexec.Repo, all bool) ([]string, error) {
-	if all {
-		return repo.ListRefs()
-	}
-	branch, err := repo.CurrentBranch()
-	if err != nil {
-		return nil, err
-	}
-	// A branch with no commits yet is a valid symbolic ref that nothing
-	// resolves to, which git log cannot walk.
-	if _, err := repo.Resolve(branch); err != nil {
-		return nil, nil
-	}
-	return []string{branch}, nil
-}
-
-// report prints the findings for each commit and returns the replacement
-// message for every commit that changes, keyed by commit hash, along with the
-// number of commits it could not consider.
-func report(opts clean.Options, commits []gitexec.Commit) (map[string]string, int) {
-	messages := make(map[string]string)
-	skipped := 0
-	for _, commit := range commits {
-		// The rewrite hands messages to git-filter-repo as JSON, which cannot
-		// carry bytes that are not valid UTF-8 without replacing them. A
-		// legacy-encoded message is left exactly as it is rather than mangled.
-		if !utf8.ValidString(commit.Message) {
-			fmt.Printf("%s %q\n    ! skipped: the message is not valid UTF-8\n", commit.Short(), commit.Subject())
-			skipped++
-			continue
-		}
-
-		findings := clean.Inspect(opts, commit.Message)
-		if findings.Empty() {
-			continue
-		}
-		messages[commit.Hash] = clean.Message(opts, commit.Message)
-
-		fmt.Printf("%s %s\n", commit.Short(), commit.Subject())
-		for _, line := range findings.RemovedLines {
-			fmt.Printf("    - %s\n", line)
-		}
-		for _, change := range findings.ChangedLines {
-			fmt.Printf("    - %s\n    + %s\n", change.Old, change.New)
-		}
-	}
-	return messages, skipped
 }
 
 func checkRewritable(repo *gitexec.Repo, cfg config) error {
@@ -228,13 +333,12 @@ func collectTargets(repo *gitexec.Repo, cfg config, refs []string) ([]target, er
 		if cfg.noBackup {
 			continue
 		}
-		saved := fmt.Sprintf("refs/ai-attributions-backup/%s/%s", stamp, strings.TrimPrefix(ref, "refs/"))
-		if err := repo.UpdateRef(hash, saved); err != nil {
+		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(ref, "refs/")); err != nil {
 			return nil, err
 		}
 	}
 	if !cfg.noBackup {
-		fmt.Printf("saved the pre-rewrite refs under refs/ai-attributions-backup/%s/\n", stamp)
+		fmt.Printf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
 	}
 	return targets, nil
 }
@@ -300,9 +404,65 @@ func pushArgs(remote string, targets []target) []string {
 	return args
 }
 
+// listBackups prints the saved refs, grouped by the run that saved them.
+func listBackups(repo *gitexec.Repo) error {
+	out, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname:short)", backupPrefix)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) == "" {
+		fmt.Println("no backups saved")
+		return nil
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		ref, hash, _ := strings.Cut(line, " ")
+		saved := strings.TrimPrefix(ref, backupPrefix)
+		stamp, original, _ := strings.Cut(saved, "/")
+		fmt.Printf("%s  refs/%s  %s\n", stamp, original, hash)
+	}
+	fmt.Printf("\nrestore one run with: ai-attributions -restore <timestamp>\n")
+	return nil
+}
+
+// restoreBackup points each saved ref back at the commit it held.
+func restoreBackup(repo *gitexec.Repo, stamp string) error {
+	out, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix+stamp)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) == "" {
+		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		ref, hash, _ := strings.Cut(line, " ")
+		original := "refs/" + strings.TrimPrefix(ref, backupPrefix+stamp+"/")
+		if err := repo.UpdateRef(hash, original); err != nil {
+			return err
+		}
+		fmt.Printf("%s -> %s\n", original, shorten(hash))
+	}
+	fmt.Println("\nrestored. A published rewrite still needs a force push to undo on the remote")
+	return nil
+}
+
 func shorten(hash string) string {
 	if len(hash) > 12 {
 		return hash[:12]
 	}
 	return hash
+}
+
+// sortedByCount renders a tally as lines ordered by descending count.
+func sortedByCount(tally map[string]int) []string {
+	keys := make([]string, 0, len(tally))
+	for key := range tally {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(a, b int) bool {
+		if tally[keys[a]] != tally[keys[b]] {
+			return tally[keys[a]] > tally[keys[b]]
+		}
+		return keys[a] < keys[b]
+	})
+	return keys
 }
