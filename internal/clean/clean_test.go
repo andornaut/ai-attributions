@@ -4,7 +4,7 @@ import "testing"
 
 var both = Options{Trailers: true, Emdashes: true}
 
-func TestMessage(t *testing.T) {
+func TestApply(t *testing.T) {
 	tests := []struct {
 		name string
 		opts Options
@@ -129,18 +129,18 @@ func TestMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Message(tt.opts, tt.in); got != tt.want {
-				t.Errorf("Message() = %q, want %q", got, tt.want)
+			if got, _ := Apply(tt.opts, tt.in); got != tt.want {
+				t.Errorf("Apply() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-// Inspect reports what Message would do, and the report is what the scan
-// tallies, so the two have to agree on every line.
-func TestInspect(t *testing.T) {
+// The findings are what the scan tallies, so they have to name every line the
+// rewritten message changed.
+func TestApplyFindings(t *testing.T) {
 	in := "fix the parser — it was unreadable\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"
-	got := Inspect(both, in)
+	_, got := Apply(both, in)
 
 	if len(got.RemovedLines) != 1 || got.RemovedLines[0] != "Co-Authored-By: Claude <noreply@anthropic.com>" {
 		t.Errorf("RemovedLines = %q", got.RemovedLines)
@@ -151,11 +151,8 @@ func TestInspect(t *testing.T) {
 	if got.ChangedLines[0].New != "fix the parser - it was unreadable" {
 		t.Errorf("ChangedLines[0].New = %q", got.ChangedLines[0].New)
 	}
-	if got.Empty() {
-		t.Error("Empty() reported no findings")
-	}
 
-	if !Inspect(both, "fix(api): reject empty payloads\n").Empty() {
+	if _, clean := Apply(both, "fix(api): reject empty payloads\n"); !clean.Empty() {
 		t.Error("Empty() reported findings for a clean message")
 	}
 }

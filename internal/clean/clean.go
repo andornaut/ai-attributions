@@ -4,7 +4,6 @@ package clean
 
 import (
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -78,23 +77,19 @@ var attributionKeys = map[string]bool{
 	"signed-off-by":  true,
 }
 
-// dashRe matches a run of emdashes, endashes, figure dashes and horizontal
-// bars, which is what a rewrite replaces with a hyphen.
-var dashRe = regexp.MustCompile(`[\x{2012}\x{2013}\x{2014}\x{2015}]+`)
+// dashes are the characters a rewrite replaces with a hyphen: emdashes,
+// endashes, figure dashes and horizontal bars.
+const dashes = "‒–—―"
 
-// Message returns msg with the selected transformations applied.
-func Message(opts Options, msg string) string {
-	out, _ := apply(opts, msg)
-	return out
-}
+// urlOrDashRe matches a URL or a run of dashes. The URL alternative comes first
+// and is matched only to step over it, since a dash inside one is part of the
+// address rather than punctuation.
+var urlOrDashRe = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s<>]+|[` + dashes + `]+`)
 
-// Inspect returns what Message would change in msg without rewriting it.
-func Inspect(opts Options, msg string) Findings {
-	_, findings := apply(opts, msg)
-	return findings
-}
-
-func apply(opts Options, msg string) (string, Findings) {
+// Apply returns msg with the selected transformations applied, along with what
+// they changed. One walk answers both, since a caller decides from the findings
+// whether the rewritten message is one it wants.
+func Apply(opts Options, msg string) (string, Findings) {
 	var findings Findings
 
 	body := strings.TrimRight(msg, "\n")
@@ -237,31 +232,17 @@ func collapseBlanks(lines []string) []string {
 
 // replaceDashes rewrites emdashes, endashes, and their relatives as hyphens,
 // whatever the dash is doing: a run of them is one hyphen, and the spacing
-// around it is left as it was. URLs are masked first, since a dash inside one
-// is part of the address rather than punctuation.
+// around it is left as it was.
 func replaceDashes(line string) string {
-	line, urls := maskURLs(line)
-	return unmaskURLs(dashRe.ReplaceAllString(line, "-"), urls)
-}
-
-// urlMark brackets a masked URL. NUL cannot appear in a commit message, so the
-// mask cannot collide with the surrounding text.
-const urlMark = "\x00"
-
-var urlRe = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s<>]+`)
-
-func maskURLs(line string) (string, []string) {
-	var urls []string
-	masked := urlRe.ReplaceAllStringFunc(line, func(url string) string {
-		urls = append(urls, url)
-		return urlMark + strconv.Itoa(len(urls)-1) + urlMark
-	})
-	return masked, urls
-}
-
-func unmaskURLs(line string, urls []string) string {
-	for i, url := range urls {
-		line = strings.Replace(line, urlMark+strconv.Itoa(i)+urlMark, url, 1)
+	// Most lines hold no dash at all, and the scan reads every line of every
+	// commit message.
+	if !strings.ContainsAny(line, dashes) {
+		return line
 	}
-	return line
+	return urlOrDashRe.ReplaceAllStringFunc(line, func(match string) string {
+		if strings.Contains(match, "://") {
+			return match
+		}
+		return "-"
+	})
 }

@@ -1,6 +1,6 @@
 # ai-attributions
 
-AI attributions are ads, block them!
+AI attributions in commits are ads, remove them!
 
 Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the agent identities on the commits themselves, and the emdashes on those same commits.
 
@@ -61,7 +61,7 @@ Run `ai-attributions --help` to view the available commands and flags:
 ```text
 usage: ai-attributions [command] [flags] [repo-path]
 
-AI attributions are ads, block them!
+AI attributions in commits are ads, remove them!
 
 Reports the AI attributions in a repository's history. Nothing is rewritten
 unless the apply command asks for it. repo-path defaults to the current

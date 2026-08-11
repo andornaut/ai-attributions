@@ -44,11 +44,6 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		commits:    len(commits),
 	}
 
-	// An emdash is never a reason to rewrite a commit. It is cleaned up only on
-	// a commit that an attribution is already moving, so that the number of
-	// commits changing hash is decided by attributions alone.
-	attribution := clean.Options{Trailers: opts.Trailers}
-
 	for _, commit := range commits {
 		var change rewrite.Change
 		item := detail{commit: commit}
@@ -57,18 +52,21 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		// The rewrite carries messages as JSON, which cannot hold bytes that are
 		// not valid UTF-8. Such a message is left as it is, though the
 		// identities beside it can still be fixed.
-		readable := utf8.ValidString(commit.Message)
-		if !readable {
+		var message string
+		var got clean.Findings
+		if utf8.ValidString(commit.Message) {
+			message, got = clean.Apply(opts, commit.Message)
+		} else {
 			found.skipped++
 		}
 
-		if readable {
-			if got := clean.Inspect(attribution, commit.Message); !got.Empty() {
-				flagged = true
-				item.removedLines = got.RemovedLines
-				for _, line := range got.RemovedLines {
-					found.removed[strings.TrimSpace(line)]++
-				}
+		// A trailer is what moves a commit. Emdashes are counted separately,
+		// below, because they ride along rather than decide anything.
+		if len(got.RemovedLines) > 0 {
+			flagged = true
+			item.removedLines = got.RemovedLines
+			for _, line := range got.RemovedLines {
+				found.removed[strings.TrimSpace(line)]++
 			}
 		}
 
@@ -94,18 +92,16 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			}
 		}
 
-		// Emdashes are rewritten only once something else has earned the
-		// rewrite.
-		if readable {
-			if flagged {
-				if got := clean.Inspect(opts, commit.Message); !got.Empty() {
-					change.Message = clean.Message(opts, commit.Message)
-					item.changedLines = got.ChangedLines
-					found.emdashes += len(got.ChangedLines)
-				}
-			} else if opts.Emdashes && !clean.Inspect(opts, commit.Message).Empty() {
-				found.emdashesLeft++
-			}
+		// An emdash is never a reason to rewrite a commit. It is cleaned up only
+		// on a commit that an attribution is already moving, so that the number
+		// of commits changing hash is decided by attributions alone.
+		switch {
+		case flagged && !got.Empty():
+			change.Message = message
+			item.changedLines = got.ChangedLines
+			found.emdashes += len(got.ChangedLines)
+		case !flagged && len(got.ChangedLines) > 0:
+			found.emdashesLeft++
 		}
 
 		if change != (rewrite.Change{}) {
@@ -235,7 +231,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 			continue
 		}
 		fmt.Printf("%s: %d of %d commits will change hash, starting at %s %s\n",
-			ref, len(dirty), len(graph), shorten(earliest), repo.Describe(earliest))
+			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
 	}
 	return nil
 }

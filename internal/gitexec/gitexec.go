@@ -33,11 +33,15 @@ func (c Commit) Subject() string {
 	return c.Message
 }
 
-func (c Commit) Short() string {
-	if len(c.Hash) > 12 {
-		return c.Hash[:12]
+func (c Commit) Short() string { return Short(c.Hash) }
+
+// Short abbreviates a commit hash. One definition, so that a report naming a
+// commit twice cannot print two widths.
+func Short(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
 	}
-	return c.Hash
+	return hash
 }
 
 func Open(dir string) (*Repo, error) {

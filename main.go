@@ -24,7 +24,7 @@ import (
 
 const usage = `usage: ai-attributions [command] [flags] [repo-path]
 
-AI attributions are ads, block them!
+AI attributions in commits are ads, remove them!
 
 Reports the AI attributions in a repository's history. Nothing is rewritten
 unless the apply command asks for it. repo-path defaults to the current
@@ -516,7 +516,7 @@ func reportRewritten(repo *gitexec.Repo, targets []target) {
 		if err != nil {
 			continue
 		}
-		fmt.Printf("%s %s -> %s\n", t.ref, shorten(t.hash), shorten(hash))
+		fmt.Printf("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(hash))
 	}
 }
 
@@ -601,7 +601,7 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 		if err := repo.UpdateRef(hash, original); err != nil {
 			return err
 		}
-		fmt.Printf("%s -> %s\n", original, shorten(hash))
+		fmt.Printf("%s -> %s\n", original, gitexec.Short(hash))
 		restored++
 	}
 	if restored == 0 {
@@ -609,13 +609,6 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 	}
 	fmt.Println("\nrestored. A published rewrite still needs a force push to undo on the remote")
 	return nil
-}
-
-func shorten(hash string) string {
-	if len(hash) > 12 {
-		return hash[:12]
-	}
-	return hash
 }
 
 // sortedByCount orders a tally's keys by descending count.
