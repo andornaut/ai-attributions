@@ -85,7 +85,7 @@ This is the half that GitHub reads. The contributor list on a repository is buil
 
 The same test decides an identity as decides a trailer, so a committer named Devin Smith is left alone for the same reason a co-author is, and a Dependabot commit keeps its author.
 
-Re-attribution is the one part that needs an identity to move a commit to. Scanning and `check` report agent identities without one, so a CI job that never configures git still works.
+Re-attribution is the one part that needs an identity to move a commit to. Scanning reports agent identities without one, so a CI job that never configures git still works.
 
 ### Emdashes
 
@@ -116,7 +116,7 @@ Every decision is made in Go. The rewrite writes a map of original commit hash t
 go install github.com/andornaut/ai-attributions@latest
 ```
 
-`git-filter-repo` has to be on `PATH` for `apply`. Scanning and `check` work without it.
+`git-filter-repo` has to be on `PATH` for `apply`. Scanning works without it.
 
 ```bash
 pip install --user git-filter-repo   # or: apt install git-filter-repo
@@ -134,7 +134,6 @@ directory.
 
 commands:
   scan                 report what would change (default)
-  check                report, and exit non-zero when anything is found
   apply                rewrite the history
   backups              list the pre-rewrite refs saved by earlier runs
   restore <timestamp>  put the refs saved by one run back
@@ -143,6 +142,7 @@ commands:
 flags:
   --all                every local branch and tag, not just the current branch
   --exclude glob       skip refs matching this glob (repeatable)
+  --exit-code          exit 1 when attributions are found, as git diff does (scan only)
   --identity identity  identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
   --push               force push the rewritten refs (apply only)
   --verbose            report every commit rather than a summary
@@ -181,10 +181,10 @@ ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
 
 ### Catching them before they land
 
-Rewriting published history is the expensive fix. `check` reports and exits non-zero, which is what a CI job or a pre-push hook wants:
+Rewriting published history is the expensive fix. `--exit-code` reports as usual and exits 1 when anything is found, the way `git diff --exit-code` does, which is what a CI job or a pre-push hook wants:
 
 ```bash
-ai-attributions check || exit 1
+ai-attributions --exit-code
 ```
 
 It needs no git identity configured, and it accounts for the remote branches it names as well as the refs in scope, so it cannot pass a run whose own output reports attributions.

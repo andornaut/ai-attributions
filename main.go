@@ -30,7 +30,6 @@ directory.
 
 commands:
   scan                 report what would change (default)
-  check                report, and exit non-zero when anything is found
   apply                rewrite the history
   backups              list the pre-rewrite refs saved by earlier runs
   restore <timestamp>  put the refs saved by one run back
@@ -47,7 +46,8 @@ const (
 	identityNone = "none"
 )
 
-// errFound reports attributions to the caller of check without printing.
+// errFound carries a --exit-code failure without printing anything: the report
+// above it has already said what was found.
 var errFound = errors.New("attributions found")
 
 // stampRe matches the timestamp a backup is saved under.
@@ -56,7 +56,7 @@ var stampRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 // commands are the modes the tool runs in. They are mutually exclusive, which
 // is why they are commands rather than flags.
 var commands = map[string]bool{
-	"scan": true, "check": true, "apply": true,
+	"scan": true, "apply": true,
 	"backups": true, "restore": true, "version": true,
 }
 
@@ -64,6 +64,7 @@ type config struct {
 	command  string
 	all      bool
 	exclude  refPatterns
+	exitCode bool
 	identity string
 	push     bool
 	verbose  bool
@@ -171,6 +172,7 @@ func parseArgs(argv []string) (config, []string, error) {
 	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
 	flags.BoolVar(&cfg.all, "all", false, "every local branch and tag, not just the current branch")
 	flags.Var(&cfg.exclude, "exclude", "skip refs matching this `glob` (repeatable)")
+	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when attributions are found, as git diff does (scan only)")
 	flags.StringVar(&cfg.identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
 	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs (apply only)")
 	flags.BoolVar(&cfg.verbose, "verbose", false, "report every commit rather than a summary")
@@ -182,8 +184,11 @@ func parseArgs(argv []string) (config, []string, error) {
 		return cfg, nil, err
 	}
 
-	if cfg.push && !cfg.applying() {
+	switch {
+	case cfg.push && !cfg.applying():
 		return cfg, nil, fmt.Errorf("--push belongs to apply; there is nothing to push until the history is rewritten")
+	case cfg.exitCode && cfg.command != "scan":
+		return cfg, nil, fmt.Errorf("--exit-code belongs to scan, which reports without changing anything")
 	}
 	return cfg, flags.Args(), nil
 }
@@ -247,7 +252,7 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		if len(found.changes) > 0 {
 			fmt.Println("\nnothing was rewritten. Run apply to rewrite the history")
 		}
-		if cfg.command == "check" {
+		if cfg.exitCode {
 			return errFound
 		}
 		return nil
