@@ -41,10 +41,10 @@ nothing was rewritten. Run apply to rewrite the history
 go install github.com/andornaut/ai-attributions@latest
 ```
 
-Or unpack a release archive, which needs no Go. `dev` is a rolling tag that CI re-cuts on every push to `main`; a tagged release is the same URL with `dev` replaced by the tag.
+Or unpack a release archive, which needs no Go. Any release tag goes in the URL; `dev` is the rolling one, re-cut on every push to `main`.
 
 ```bash
-curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/dev/ai-attributions_linux_x86_64.tar.gz \
+curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.0/ai-attributions_linux_x86_64.tar.gz \
     | tar -xzf - -C ~/.local/bin ai-attributions
 ```
 
@@ -212,16 +212,18 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: andornaut/ai-attributions@main
+      - uses: andornaut/ai-attributions@v1
 ```
 
 Input | Default | What it is
 --- | --- | ---
 `base` | the pull request's base branch, else the commit the push started from, else the default branch | the ref the branch is measured against
-`version` | `dev` | the release to install
+`version` | the release the action was cut with | the release to install
 `path` | `.` | the repository to scan, relative to the workspace
 
-There are two halves to pin, and no tag to pin them to yet: the ref decides which `action.yml` runs, and `version` decides which binary it installs. `dev` is re-cut on every push to `main`, so both halves track `main` until a `v*` tag exists. Then they move together: `uses: andornaut/ai-attributions@v1.0.0` with `version: v1.0.0`.
+`v1` follows the newest `v1.x.y`, and CI re-points it as part of publishing one. Pinning it rather than `main` is what decides when a change in what counts as an attribution reaches a workflow, which is the change that turns a passing repository into a failing one without a flag moving. `@v1.0.0` pins that exactly, and a commit sha pins the action's own code too.
+
+The `version` input is the release whose binary gets installed, and its default is the release `action.yml` itself was cut with, so a workflow on `@v1` moves both halves together. `version: dev` installs the build re-cut on every push to `main`.
 
 The action downloads the linux archive, checks it against `checksums.txt` and puts it on `PATH`, so the runner needs no Go and no `git-filter-repo`. It runs on `ubuntu-latest` and on arm64 runners; other platforms have no archive to install and fail with that.
 
@@ -275,7 +277,7 @@ make lint           # the golangci-lint run CI does, and make fmt applies
 make build          # a stripped static binary at bin/ai-attributions
 ```
 
-CI runs the tests, `golangci-lint`, and a cross-compile for each release platform on every push and pull request. A push to `main` re-cuts the `dev` release from those builds; a `v*` tag publishes a release with [GoReleaser](https://goreleaser.com/).
+CI runs the tests, `golangci-lint`, and a cross-compile for each release platform on every push and pull request. A push to `main` re-cuts the `dev` release from those builds; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it, so `v1` is a pointer CI moves rather than a tag to publish by hand.
 
 Every decision is made in Go. The rewrite writes a map of original commit hash to replacement fields, then hands `git-filter-repo` a `--commit-callback` that looks each commit up by `commit.original_id`, so what the scan prints is what gets written.
 

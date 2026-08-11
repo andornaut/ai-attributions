@@ -33,3 +33,8 @@ jobs:
       # here against a real pull request rather than only in tests.
       - name: Scan the branch
         uses: ./
+        with:
+          # The rolling build, not the release action.yml defaults to: this
+          # repository is where that default gets bumped, and a bump names a
+          # release that is published after the commit making it.
+          version: dev

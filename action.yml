@@ -16,10 +16,11 @@ inputs:
     default: ""
   version:
     description: >-
-      The ai-attributions release to install. dev is re-cut on every push to
-      main; name a tag to pin one build, and bump this default with it.
+      The ai-attributions release to install. The default is the release this
+      action.yml was cut with, so a workflow on @v1 moves binary and action
+      together. dev is the build re-cut on every push to main.
     required: false
-    default: dev
+    default: v1.0.0
   path:
     description: The repository to scan, relative to the workspace.
     required: false
