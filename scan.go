@@ -192,17 +192,20 @@ func (f findings) reportSkipped() {
 	}
 }
 
-// reportRadius names how many commits the rewrite moves. Every descendant of a
-// changed commit gets a new hash.
-func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
+// reportRadius names how many commits the rewrite moves, and returns every
+// commit that changes hash. Every descendant of a changed commit gets a new
+// hash, so the set is what a ref pointing into this history has to be measured
+// against.
+func (f findings) reportRadius(repo *gitexec.Repo, refs []string) (map[string]bool, error) {
+	moved := map[string]bool{}
 	if len(f.changes) == 0 {
-		return nil
+		return moved, nil
 	}
 	fmt.Println()
 	for _, ref := range refs {
 		graph, err := repo.Graph(ref)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		dirty := make(map[string]bool, len(graph))
@@ -223,6 +226,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 				}
 			}
 			dirty[hash] = true
+			moved[hash] = true
 			if earliest == "" {
 				earliest = hash
 			}
@@ -233,7 +237,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 		fmt.Printf("%s: %d of %d commits will change hash, starting at %s %s\n",
 			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
 	}
-	return nil
+	return moved, nil
 }
 
 // reportRemoteOnly names remote branches that carry attributions and are not

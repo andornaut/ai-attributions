@@ -153,6 +153,8 @@ Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of 
 ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
 ```
 
+A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. Its commits are in the rewrite either way, so carrying the tag repoints it without widening what is rewritten. The scan lists the tags this covers, and a tag `--exclude` matched is repointed locally and left out of the push: exclusion decides what is scanned and published, not whether a local ref is left behind.
+
 Remote branches sit outside that set. The scan names any that carry attributions and are not already covered, below the findings and counted in none of them, including `--exit-code`. Rewriting one means checking it out first. It reads remote-tracking refs rather than the remote, so no network is needed, and a branch deleted upstream is listed until `git fetch --prune` clears it.
 
 ### Forks
@@ -193,12 +195,15 @@ refs/heads/main -> 812479bfcbdf
 restored. A published rewrite still needs a force push to undo on the remote
 ```
 
+The push covers the refs the rewrite moved, and only those: a ref whose commits carried no change keeps its hash, and forcing it would put a value this run never produced on the remote.
+
 A branch is pushed with `--force-with-lease` against its remote-tracking ref, so a remote that moved since the last fetch rejects the push. A ref with no remote-tracking counterpart, a tag for instance, has nothing to lease against and is forced; those refs are named in the output.
 
 ## Limitations
 
 - Only commit messages and identities are rewritten. File contents are untouched.
-- Annotated tag messages are not scanned, though tags are repointed at the rewritten commits.
+- Annotated tag messages are not scanned, though the tags themselves are repointed at the rewritten commits.
+- A tag is repointed locally. Publishing that move is still a force push, which changes what a release built from the tag is built from.
 - Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported.
 - A fork is skipped without inspection, so an attribution on a commit of your own in a fork is left alone.
 - A commit message that is not valid UTF-8 is reported and left as it is, because the rewrite carries messages through JSON. The identities on that commit are still rewritten.

@@ -13,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -74,14 +75,26 @@ type config struct {
 
 func (c config) applying() bool { return c.command == "apply" }
 
-// target is a ref to rewrite, the commit it pointed at beforehand, and the
-// value to expect on the remote when pushing. The lease is empty for a ref with
-// no remote-tracking counterpart, such as a tag or a branch never pushed.
+// target is a ref to rewrite, the commit it pointed at beforehand, where it
+// ended up, and the value to expect on the remote when pushing. The lease is
+// empty for a ref with no remote-tracking counterpart, such as a tag or a
+// branch never pushed.
 type target struct {
 	ref   string
 	hash  string
+	after string
 	lease string
+
+	// publish is false for a ref the rewrite has to repoint but the run does
+	// not own: a tag --exclude left out of scope still has to come off the
+	// commits it names, but publishing it is not this run's call.
+	publish bool
 }
+
+// moved reports whether the rewrite changed where a ref points. A ref whose
+// commits carried no change keeps its hash, and pushing it would force a value
+// this run did not produce over whatever the remote holds.
+func (t target) moved() bool { return t.after != "" && t.after != t.hash }
 
 // identity is the name and address to put on a commit an agent authored. Both
 // parts are set together or not at all, so a rewrite cannot assign half of one.
@@ -246,9 +259,15 @@ func scan(repo *gitexec.Repo, cfg config) error {
 
 	found := inspect(opts, who, commits)
 	found.report(cfg.verbose, refs)
-	if err := found.reportRadius(repo, refs); err != nil {
+	moved, err := found.reportRadius(repo, refs)
+	if err != nil {
 		return err
 	}
+	carried, err := carriedTags(repo, cfg, refs, moved)
+	if err != nil {
+		return err
+	}
+	reportCarried(carried)
 	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 		return err
 	}
@@ -265,7 +284,51 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		}
 		return nil
 	}
-	return apply(repo, cfg, refs, found.changes)
+	return apply(repo, cfg, refs, carried, found.changes)
+}
+
+// carriedTags returns the tags that name a commit the rewrite moves and are not
+// in scope already. A rewritten commit gets a new hash, so a tag left out would
+// go on naming history nothing else references. Their commits are in the
+// rewrite either way, so carrying the tags repoints them without widening what
+// is rewritten.
+func carriedTags(repo *gitexec.Repo, cfg config, refs []string, moved map[string]bool) ([]target, error) {
+	if len(moved) == 0 {
+		return nil, nil
+	}
+	tags, err := repo.Tags()
+	if err != nil {
+		return nil, err
+	}
+
+	var carried []target
+	for _, tag := range tags {
+		if !moved[tag.Commit] || slices.Contains(refs, tag.Ref) {
+			continue
+		}
+		excluded, err := cfg.exclude.matches(tag.Ref)
+		if err != nil {
+			return nil, err
+		}
+		carried = append(carried, target{ref: tag.Ref, publish: !excluded})
+	}
+	return carried, nil
+}
+
+// reportCarried names the tags that move without being in scope, which the refs
+// the run was pointed at do not say by themselves.
+func reportCarried(carried []target) {
+	if len(carried) == 0 {
+		return
+	}
+	fmt.Println("\ntags naming a commit that changes hash, repointed along with it")
+	for _, t := range carried {
+		if t.publish {
+			fmt.Printf("  %s\n", t.ref)
+			continue
+		}
+		fmt.Printf("  %s (excluded, so it is repointed here and not pushed)\n", t.ref)
+	}
 }
 
 // forkUpstream returns the remote through which a fork tracks the project it
@@ -432,27 +495,42 @@ func (p refPatterns) matches(ref string) (bool, error) {
 	return false, nil
 }
 
-func apply(repo *gitexec.Repo, cfg config, refs []string, changes map[string]rewrite.Change) error {
+func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, changes map[string]rewrite.Change) error {
 	if err := checkRewritable(repo, cfg); err != nil {
 		return err
 	}
-	targets, err := collectTargets(repo, cfg, refs)
+	targets, err := collectTargets(repo, cfg, refs, carried)
 	if err != nil {
 		return err
 	}
-	if err := rewrite.Run(repo, refs, changes); err != nil {
+	if err := rewrite.Run(repo, refNames(targets), changes); err != nil {
 		return err
 	}
-	reportRewritten(repo, targets)
-	reportUnleased(targets)
+	resolveRewritten(repo, targets)
+	reportRewritten(targets)
+
+	publish := publishable(targets)
+	if len(publish) == 0 {
+		fmt.Println("\nno ref moved, so there is nothing to push")
+		return nil
+	}
+	reportUnleased(publish)
 
 	if cfg.push {
 		fmt.Printf("\npushing to %s\n", cfg.remote)
-		return repo.Run(pushArgs(cfg.remote, targets)...)
+		return repo.Run(pushArgs(cfg.remote, publish)...)
 	}
 	fmt.Printf("\nnot pushed. To publish the rewrite:\n\n    git %s\n\n",
-		strings.Join(pushArgs(cfg.remote, targets), " "))
+		strings.Join(pushArgs(cfg.remote, publish), " "))
 	return nil
+}
+
+func refNames(targets []target) []string {
+	refs := make([]string, 0, len(targets))
+	for _, t := range targets {
+		refs = append(refs, t.ref)
+	}
+	return refs
 }
 
 func checkRewritable(repo *gitexec.Repo, cfg config) error {
@@ -475,18 +553,25 @@ func checkRewritable(repo *gitexec.Repo, cfg config) error {
 }
 
 // collectTargets records where each ref pointed before the rewrite, along with
-// the remote value to hold the push lease against.
-func collectTargets(repo *gitexec.Repo, cfg config, refs []string) ([]target, error) {
+// the remote value to hold the push lease against. Carried tags are backed up
+// with the refs in scope, so restore puts a repointed tag back too.
+func collectTargets(repo *gitexec.Repo, cfg config, refs []string, carried []target) ([]target, error) {
 	stamp := time.Now().UTC().Format("20060102T150405Z")
-	targets := make([]target, 0, len(refs))
+	targets := make([]target, 0, len(refs)+len(carried))
 	for _, ref := range refs {
-		hash, err := repo.Resolve(ref)
+		targets = append(targets, target{ref: ref, publish: true})
+	}
+	targets = append(targets, carried...)
+
+	for i, t := range targets {
+		hash, err := repo.Resolve(t.ref)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, target{ref: ref, hash: hash, lease: leaseFor(repo, cfg.remote, ref)})
+		targets[i].hash = hash
+		targets[i].lease = leaseFor(repo, cfg.remote, t.ref)
 
-		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(ref, "refs/")); err != nil {
+		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(t.ref, "refs/")); err != nil {
 			return nil, err
 		}
 	}
@@ -509,15 +594,39 @@ func leaseFor(repo *gitexec.Repo, remote, ref string) string {
 	return lease
 }
 
-func reportRewritten(repo *gitexec.Repo, targets []target) {
+// resolveRewritten records where each ref ended up, so that what moved is read
+// from the refs rather than inferred from the changes. A ref that cannot be
+// resolved keeps an empty value and counts as unmoved, which leaves it out of
+// the push.
+func resolveRewritten(repo *gitexec.Repo, targets []target) {
+	for i, t := range targets {
+		if hash, err := repo.Resolve(t.ref); err == nil {
+			targets[i].after = hash
+		}
+	}
+}
+
+func reportRewritten(targets []target) {
 	fmt.Println()
 	for _, t := range targets {
-		hash, err := repo.Resolve(t.ref)
-		if err != nil {
+		if !t.moved() {
 			continue
 		}
-		fmt.Printf("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(hash))
+		fmt.Printf("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(t.after))
 	}
+}
+
+// publishable returns the refs the push covers: the ones this run moved and
+// owns. Pushing a ref that did not move would force a value this run did not
+// produce, and a tag is forced without a lease to stop it.
+func publishable(targets []target) []target {
+	var publish []target
+	for _, t := range targets {
+		if t.publish && t.moved() {
+			publish = append(publish, t)
+		}
+	}
+	return publish
 }
 
 // reportUnleased names the refs that will be pushed without a lease, so the

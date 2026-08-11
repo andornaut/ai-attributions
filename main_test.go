@@ -43,6 +43,104 @@ func TestExcludeMatchesRejectsABadPattern(t *testing.T) {
 	}
 }
 
+// A tag naming a commit the rewrite moves is repointed with it, whatever refs
+// the run was pointed at, since a tag left behind would go on naming history
+// nothing else references. --exclude keeps a tag out of the push, not out of
+// the rewrite.
+func TestCarriedTags(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("tag", "--annotate", "v1", "--message=release")
+	git("tag", "light")
+	git("tag", "dev")
+	git("commit", "--quiet", "--allow-empty", "--message=second")
+	git("tag", "unmoved")
+
+	first, err := repo.Resolve("HEAD~1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := map[string]bool{first: true}
+
+	tests := []struct {
+		name   string
+		cfg    config
+		refs   []string
+		moved  map[string]bool
+		want   []string
+		noPush []string
+	}{
+		{
+			name:  "a tag naming a moved commit is carried, an annotated one included",
+			refs:  []string{"refs/heads/main"},
+			moved: moved,
+			want:  []string{"refs/tags/dev", "refs/tags/light", "refs/tags/v1"},
+		},
+		{
+			name:   "an excluded tag is carried, and left out of the push",
+			cfg:    config{exclude: refPatterns{"dev"}},
+			refs:   []string{"refs/heads/main"},
+			moved:  moved,
+			want:   []string{"refs/tags/dev", "refs/tags/light", "refs/tags/v1"},
+			noPush: []string{"refs/tags/dev"},
+		},
+		{
+			name:  "a tag already in scope is not carried twice",
+			refs:  []string{"refs/heads/main", "refs/tags/v1"},
+			moved: moved,
+			want:  []string{"refs/tags/dev", "refs/tags/light"},
+		},
+		{
+			name:  "nothing moving carries nothing",
+			refs:  []string{"refs/heads/main"},
+			moved: map[string]bool{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			carried, err := carriedTags(repo, tt.cfg, tt.refs, tt.moved)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var got, noPush []string
+			for _, c := range carried {
+				got = append(got, c.ref)
+				if !c.publish {
+					noPush = append(noPush, c.ref)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("carriedTags() = %v, want %v", got, tt.want)
+			}
+			if !slices.Equal(noPush, tt.noPush) {
+				t.Errorf("carriedTags() kept %v out of the push, want %v", noPush, tt.noPush)
+			}
+		})
+	}
+}
+
+// The push covers what the rewrite moved and the run owns. Forcing a ref that
+// did not move would put a value this run never produced on the remote.
+func TestPublishable(t *testing.T) {
+	targets := []target{
+		{ref: "refs/heads/main", hash: "old", after: "new", publish: true},
+		{ref: "refs/heads/untouched", hash: "same", after: "same", publish: true},
+		{ref: "refs/tags/v1", hash: "old", after: "new", publish: true},
+		{ref: "refs/tags/dev", hash: "old", after: "new"},
+		{ref: "refs/tags/unresolvable", hash: "old", publish: true},
+	}
+	want := []string{"refs/heads/main", "refs/tags/v1"}
+
+	var got []string
+	for _, t := range publishable(targets) {
+		got = append(got, t.ref)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("publishable() = %v, want %v", got, want)
+	}
+}
+
 // A branch is leased against the value the remote held at the last fetch, so a
 // remote that has moved since rejects the push. A ref with no remote-tracking
 // counterpart has no such value and is forced, which + marks.

@@ -129,6 +129,45 @@ func (r *Repo) ListRefs() ([]string, error) {
 	return nonEmptyLines(out), nil
 }
 
+// Tag names a tag ref and the commit it resolves to. An annotated tag resolves
+// through its tag object to the commit below it, which is the value a rewrite
+// moves.
+type Tag struct {
+	Ref    string
+	Commit string
+}
+
+// tagFormat asks for the tag's own object and the object it peels to, so that
+// an annotated tag and a lightweight one are told apart by their fields rather
+// than by a second command.
+const tagFormat = "--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)"
+
+// Tags returns every local tag along with the commit it names. A tag naming
+// something other than a commit, a blob for instance, has no commit a rewrite
+// could move, so it is left out.
+func (r *Repo) Tags() ([]Tag, error) {
+	out, err := r.Output("for-each-ref", tagFormat, "refs/tags")
+	if err != nil {
+		return nil, err
+	}
+
+	var tags []Tag
+	for _, line := range nonEmptyLines(out) {
+		fields := strings.Split(line, "\x00")
+		if len(fields) < 5 {
+			continue
+		}
+		ref, kind, hash, peeledKind, peeled := fields[0], fields[1], fields[2], fields[3], fields[4]
+		switch {
+		case peeledKind == "commit":
+			tags = append(tags, Tag{Ref: ref, Commit: peeled})
+		case kind == "commit":
+			tags = append(tags, Tag{Ref: ref, Commit: hash})
+		}
+	}
+	return tags, nil
+}
+
 // Resolve returns the hash a ref points at. For an annotated tag this is the
 // tag object, not the commit it tags.
 func (r *Repo) Resolve(ref string) (string, error) {
