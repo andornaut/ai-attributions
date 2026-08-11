@@ -20,19 +20,19 @@ emdash rewrites, on commits an attribution is already moving
 1 commit carries an emdash and no attribution, so it is left alone;
 rewriting for a typographic fix would move commits that nothing else moves
 
-pass -verbose to list the commits behind these counts
+pass --verbose to list the commits behind these counts
 
-refs/heads/main: 4 of 5 commits will change hash, starting at d8f29bde64a2 2026-08-11 feat(parser): accept empty payloads
+refs/heads/main: 4 of 5 commits will change hash, starting at 6da5c96636ed 2026-08-11 feat(parser): accept empty payloads
 
 remote branches carrying attributions that are not in scope
      1 of 1 commits  refs/remotes/origin/agent-work
 check one out to rewrite it: git switch -c <name> origin/<name>
 these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that
 
-nothing was rewritten. Pass -apply to rewrite the history
+nothing was rewritten. Run apply to rewrite the history
 ```
 
-Scanning is what it does by default. `-apply` rewrites the history with [git-filter-repo](https://github.com/newren/git-filter-repo), and `-push` publishes it.
+Scanning is what it does by default. `apply` rewrites the history with [git-filter-repo](https://github.com/newren/git-filter-repo), and `--push` publishes it.
 
 > [!IMPORTANT]
 > Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history. The count is printed before anything is rewritten.
@@ -79,13 +79,13 @@ Body prose that mentions an agent in passing is left alone, so `The changelog is
 
 ### Identities
 
-A trailer is not the only place an agent is named. A commit whose author or committer is an agent is re-attributed to the repository's `user.name` and `user.email`, which `-identity "Name <email>"` overrides and `-no-identity` turns off.
+A trailer is not the only place an agent is named. A commit whose author or committer is an agent is re-attributed to the repository's `user.name` and `user.email`, which `--identity "Name <email>"` overrides and `--identity=none` turns off.
 
 This is the half that GitHub reads. The contributor list on a repository is built from commit authorship, not from trailers, so stripping trailers alone leaves the agent listed as a contributor.
 
 The same test decides an identity as decides a trailer, so a committer named Devin Smith is left alone for the same reason a co-author is, and a Dependabot commit keeps its author.
 
-Re-attribution is the one part that needs an identity to move a commit to. Scanning and `-check` report agent identities without one, so a CI job that never configures git still works.
+Re-attribution is the one part that needs an identity to move a commit to. Scanning and `check` report agent identities without one, so a CI job that never configures git still works.
 
 ### Emdashes
 
@@ -116,7 +116,7 @@ Every decision is made in Go. The rewrite writes a map of original commit hash t
 go install github.com/andornaut/ai-attributions@latest
 ```
 
-`git-filter-repo` has to be on `PATH` for `-apply`. Scanning and `-check` work without it.
+`git-filter-repo` has to be on `PATH` for `apply`. Scanning and `check` work without it.
 
 ```bash
 pip install --user git-filter-repo   # or: apt install git-filter-repo
@@ -126,56 +126,41 @@ pip install --user git-filter-repo   # or: apt install git-filter-repo
 
 ```console
 $ ai-attributions --help
-usage: ai-attributions [flags] [repo-path]
+usage: ai-attributions [command] [flags] [repo-path]
 
-Scans the commit messages and identities of the current branch for AI
-attributions and reports what it would change. Nothing is rewritten without
--apply. repo-path defaults to the current directory.
+Reports the AI attributions in a repository's history. Nothing is rewritten
+unless the apply command asks for it. repo-path defaults to the current
+directory.
+
+commands:
+  scan                 report what would change (default)
+  check                report, and exit non-zero when anything is found
+  apply                rewrite the history
+  backups              list the pre-rewrite refs saved by earlier runs
+  restore <timestamp>  put the refs saved by one run back
+  version              print the version
 
 flags:
-  -all
-    	scan every local branch and tag, not just the current branch
-  -apply
-    	rewrite the history; without this nothing is changed
-  -check
-    	exit non-zero when attributions are found
-  -exclude value
-    	skip refs matching this glob (repeatable)
-  -identity string
-    	identity to put on agent-authored commits (default: the repository's user.name and user.email)
-  -list-backups
-    	list the saved pre-rewrite refs, then exit
-  -no-backup
-    	skip saving the pre-rewrite refs under refs/ai-attributions-backup/
-  -no-emdashes
-    	leave emdashes alone
-  -no-identity
-    	leave agent author and committer identities alone
-  -no-trailers
-    	leave attribution trailers and footers alone
-  -push
-    	force push the rewritten refs; requires -apply
-  -remote string
-    	remote to push to (default "origin")
-  -restore string
-    	restore the refs saved under this backup timestamp, then exit
-  -verbose
-    	report every commit rather than a summary
-  -version
-    	print the version, then exit
+  --all                every local branch and tag, not just the current branch
+  --exclude glob       skip refs matching this glob (repeatable)
+  --identity identity  identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
+  --push               force push the rewritten refs (apply only)
+  --verbose            report every commit rather than a summary
 ```
 
 ```bash
-ai-attributions ~/src/example                    # report only
-ai-attributions -verbose ~/src/example           # report, commit by commit
-ai-attributions -apply ~/src/example             # rewrite the current branch
-ai-attributions -all -apply -push ~/src/example  # rewrite every branch and tag, then push
+ai-attributions ~/src/example                     # report only
+ai-attributions --verbose ~/src/example           # report, commit by commit
+ai-attributions apply ~/src/example               # rewrite the current branch
+ai-attributions apply --all --push ~/src/example  # rewrite every branch and tag, then push
 ```
+
+Every flag takes one dash or two. The documentation uses two.
 
 A rewrite reports where each ref moved and prints the push it did not run:
 
 ```console
-$ ai-attributions -apply ~/src/example
+$ ai-attributions apply ~/src/example
 ...
 saved the pre-rewrite refs under refs/ai-attributions-backup/20260811T052635Z/
 
@@ -188,18 +173,18 @@ not pushed. To publish the rewrite:
 
 ### Excluding refs
 
-`-exclude` takes a glob, is repeatable, and matches the full ref or its short name. For a remote-tracking ref the branch name alone works too, so `-exclude agent-work` covers `refs/remotes/origin/agent-work`. A tag a release workflow owns should not be rewritten by hand:
+`--exclude` takes a glob, is repeatable, and matches the full ref or its short name. For a remote-tracking ref the branch name alone works too, so `--exclude agent-work` covers `refs/remotes/origin/agent-work`. A tag a release workflow owns should not be rewritten by hand:
 
 ```bash
-ai-attributions -all -exclude dev -exclude 'release/*' -apply ~/src/example
+ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
 ```
 
 ### Catching them before they land
 
-Rewriting published history is the expensive fix. `-check` reports and exits non-zero, which is what a CI job or a pre-push hook wants:
+Rewriting published history is the expensive fix. `check` reports and exits non-zero, which is what a CI job or a pre-push hook wants:
 
 ```bash
-ai-attributions -check || exit 1
+ai-attributions check || exit 1
 ```
 
 It needs no git identity configured, and it accounts for the remote branches it names as well as the refs in scope, so it cannot pass a run whose own output reports attributions.
@@ -212,17 +197,17 @@ It reads remote-tracking refs rather than the remote, so a scan needs no network
 
 ## Safety
 
-Nothing is rewritten without `-apply`, and nothing is rewritten while tracked files have uncommitted changes. Untracked files do not count, since they cannot affect a rewrite of this kind.
+Nothing is rewritten without `apply`, and nothing is rewritten while tracked files have uncommitted changes. Untracked files do not count, since they cannot affect a rewrite of this kind.
 
-The pre-rewrite refs are saved under `refs/ai-attributions-backup/<timestamp>/`, which `-no-backup` turns off.
+The pre-rewrite refs are saved under `refs/ai-attributions-backup/<timestamp>/`.
 
 ```console
-$ ai-attributions -list-backups
+$ ai-attributions backups
 20260811T054927Z  refs/heads/main  812479b
 
-restore one run with: ai-attributions -restore <timestamp>
+put one run back with: ai-attributions restore <timestamp>
 
-$ ai-attributions -restore 20260811T054927Z
+$ ai-attributions restore 20260811T054927Z
 refs/heads/main -> 812479bfcbdf
 
 restored. A published rewrite still needs a force push to undo on the remote

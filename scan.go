@@ -162,7 +162,7 @@ func (f findings) report(verbose bool, refs []string) {
 	f.reportEmdashesLeft()
 	f.reportSkipped()
 	if !verbose {
-		fmt.Println("\npass -verbose to list the commits behind these counts")
+		fmt.Println("\npass --verbose to list the commits behind these counts")
 	}
 }
 

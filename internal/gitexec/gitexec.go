@@ -108,7 +108,7 @@ func (r *Repo) Run(args ...string) error {
 func (r *Repo) CurrentBranch() (string, error) {
 	out, err := r.Output("symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("HEAD is detached, so there is no current branch to rewrite; use -all or check out a branch")
+		return "", fmt.Errorf("HEAD is detached, so there is no current branch to rewrite; use --all or check out a branch")
 	}
 	return strings.TrimSpace(out), nil
 }
