@@ -109,11 +109,6 @@ runs:
           echo "::warning::$base names no commit here, so the whole history is scanned instead"
           base=""
         fi
-        # A branch level with its base adds nothing, which is a pass rather than
-        # a scan of the history it inherited.
-        if [ -n "$base" ] && [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse "HEAD^{commit}")" ]; then
-          echo "::warning::HEAD is $base, so there are no added commits to scan"
-        fi
         echo "AI_ATTRIBUTIONS_BASE=$base" >>"$GITHUB_ENV"
 
         # The scan reads the current branch, and a pull request is checked out
@@ -130,10 +125,19 @@ runs:
         fi
         echo "AI_ATTRIBUTIONS_BRANCH=$(git symbolic-ref --short HEAD)" >>"$GITHUB_ENV"
 
+        # Measured once the branch is attached, since a pull request is checked
+        # out at a merge commit that equals no base.
+        if [ -n "$base" ] && [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse "HEAD^{commit}")" ]; then
+          echo "::warning::HEAD is $base, so there are no added commits to scan"
+        fi
+
     - name: Scan for AI attributions
       shell: bash
       run: |
         set -uo pipefail
+        # The runner starts this shell with errexit, which would end the step
+        # at the scan itself, before it can report what the scan found.
+        set +e
 
         cd "$AI_ATTRIBUTIONS_REPO" || exit 1
         # --verbose names each commit, which is what whoever fixes them needs.
