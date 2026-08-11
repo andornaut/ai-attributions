@@ -44,7 +44,7 @@ go install github.com/andornaut/ai-attributions@latest
 Or unpack a release archive, which needs no Go. Any release tag goes in the URL; `dev` is the rolling one, re-cut on every push to `main`.
 
 ```bash
-curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.0/ai-attributions_linux_x86_64.tar.gz \
+curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.1/ai-attributions_linux_x86_64.tar.gz \
     | tar -xzf - -C ~/.local/bin ai-attributions
 ```
 
@@ -220,6 +220,9 @@ Input | Default | What it is
 `base` | the pull request's base branch, else the commit the push started from, else the default branch | the ref the branch is measured against
 `version` | the release the action was cut with | the release to install
 `path` | `.` | the repository to scan, relative to the workspace
+`identity` | whoever pushed, at their GitHub address | what the report names as the identity an agent-authored commit would move to
+
+A runner has no git identity configured, and a scan that cannot name one says so on every run. Nothing is rewritten in CI, so `identity` only decides what the report says. `identity: none` is not the way to quiet it: that turns identity reporting off, and a commit an agent authored with no trailer on it then passes.
 
 `v1` follows the newest `v1.x.y`, and CI re-points it as part of publishing one. Pinning it rather than `main` is what decides when a change in what counts as an attribution reaches a workflow, which is the change that turns a passing repository into a failing one without a flag moving. `@v1.0.0` pins that exactly, and a commit sha pins the action's own code too.
 

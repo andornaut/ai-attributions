@@ -20,11 +20,19 @@ inputs:
       action.yml was cut with, so a workflow on @v1 moves binary and action
       together. dev is the build re-cut on every push to main.
     required: false
-    default: v1.0.0
+    default: v1.0.1
   path:
     description: The repository to scan, relative to the workspace.
     required: false
     default: "."
+  identity:
+    description: >-
+      The identity an agent-authored commit would be re-attributed to, as
+      "Name <email>". Nothing is rewritten here, so this only decides what the
+      report names; it defaults to whoever pushed. Passing none turns identity
+      reporting off, which lets a commit an agent authored through the scan.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -134,6 +142,8 @@ runs:
 
     - name: Scan for AI attributions
       shell: bash
+      env:
+        INPUT_IDENTITY: ${{ inputs.identity }}
       run: |
         set -uo pipefail
         # The runner starts this shell with errexit, which would end the step
@@ -146,6 +156,17 @@ runs:
           set -- scan --exit-code --verbose --base "$AI_ATTRIBUTIONS_BASE"
         else
           set -- scan --exit-code --verbose
+        fi
+
+        # A runner has no git identity, and a scan that cannot name one says so
+        # on every run. Whoever pushed is the answer to "re-attributed to whom",
+        # and the address is the one GitHub keeps for them.
+        identity="${INPUT_IDENTITY:-}"
+        if [ -z "$identity" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
+          identity="$GITHUB_ACTOR <${GITHUB_ACTOR_ID:+$GITHUB_ACTOR_ID+}$GITHUB_ACTOR@users.noreply.github.com>"
+        fi
+        if [ -n "$identity" ]; then
+          set -- "$@" --identity "$identity"
         fi
 
         report="$RUNNER_TEMP/ai-attributions-report.txt"
