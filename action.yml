@@ -20,7 +20,7 @@ inputs:
       action.yml was cut with, so a workflow on @v1 moves binary and action
       together. dev is the build re-cut on every push to main.
     required: false
-    default: v1.0.1
+    default: v1.0.2
   path:
     description: The repository to scan, relative to the workspace.
     required: false
@@ -118,8 +118,6 @@ runs:
           echo "::warning::$base names no commit here, so the whole history is scanned instead"
           base=""
         fi
-        echo "AI_ATTRIBUTIONS_BASE=$base" >>"$GITHUB_ENV"
-
         # The scan reads the current branch, and a pull request is checked out
         # at a merge commit with HEAD detached. Its second parent is the branch
         # itself, which is the history the pull request is asking to merge.
@@ -135,10 +133,16 @@ runs:
         echo "AI_ATTRIBUTIONS_BRANCH=$(git symbolic-ref --short HEAD)" >>"$GITHUB_ENV"
 
         # Measured once the branch is attached, since a pull request is checked
-        # out at a merge commit that equals no base.
+        # out at a merge commit that equals no base. A base that is HEAD itself
+        # measures nothing, which is what a force push to the default branch
+        # produces: the commit it started from is not in the checkout, and the
+        # fallback is the branch being pushed. Read the whole history there,
+        # rather than passing a run that looked at no commits.
         if [ -n "$base" ] && [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse "HEAD^{commit}")" ]; then
-          echo "::warning::HEAD is $base, so there are no added commits to scan"
+          echo "::warning::$base is HEAD itself, so the whole history is scanned instead"
+          base=""
         fi
+        echo "AI_ATTRIBUTIONS_BASE=$base" >>"$GITHUB_ENV"
 
     - name: Scan for AI attributions
       shell: bash
