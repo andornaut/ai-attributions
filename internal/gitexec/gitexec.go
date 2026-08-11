@@ -3,6 +3,7 @@ package gitexec
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -64,6 +65,14 @@ func (r *Repo) Dir() string { return r.dir }
 
 // Output runs git and returns its standard output.
 func (r *Repo) Output(args ...string) (string, error) {
+	out, _, err := r.output(args...)
+	return out, err
+}
+
+// output runs git and returns its standard output along with the exit status,
+// so that a caller can tell the status a command uses to report "nothing
+// matched" from a real failure. The status is -1 when git could not be run.
+func (r *Repo) output(args ...string) (string, int, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
 	var stdout, stderr bytes.Buffer
@@ -74,9 +83,13 @@ func (r *Repo) Output(args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		status := -1
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+			status = exit.ExitCode()
+		}
+		return "", status, fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
 	}
-	return stdout.String(), nil
+	return stdout.String(), 0, nil
 }
 
 // CombinedOutput runs git and returns its standard output and standard error
@@ -249,22 +262,34 @@ type Remote struct {
 	Project string
 }
 
-// Remotes returns every configured remote.
+// Remotes returns every configured remote, one per remote rather than one per
+// URL: remote.<name>.url is multi-valued, and a remote with several URLs
+// fetches from the first, so that is the one that describes it.
 func (r *Repo) Remotes() ([]Remote, error) {
-	out, err := r.Output("config", "--get-regexp", `^remote\..*\.url$`)
+	out, status, err := r.output("config", "--get-regexp", `^remote\..*\.url$`)
 	if err != nil {
-		// A repository with no remotes has nothing to report, which git
-		// signals by exiting non-zero.
-		return nil, nil
+		// git config exits 1 when the pattern matches nothing, which for this
+		// pattern is a repository with no remotes. Any other status is a
+		// failure to read the configuration, which the caller has to hear
+		// about rather than read as "no remotes".
+		if status == 1 {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	var remotes []Remote
+	seen := make(map[string]bool)
 	for line := range strings.SplitSeq(out, "\n") {
 		key, url, found := strings.Cut(strings.TrimSpace(line), " ")
 		if !found {
 			continue
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
 		remotes = append(remotes, Remote{Name: name, URL: url, Project: project(url)})
 	}
 	return remotes, nil
@@ -272,25 +297,49 @@ func (r *Repo) Remotes() ([]Remote, error) {
 
 // project reduces a remote URL to host/owner/repo, so that the same project
 // reached over ssh and over https compares equal and two different projects
-// do not.
+// do not. Case is folded, since the forges resolve a host, owner, and
+// repository name without regard to it.
 func project(url string) string {
-	trimmed := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
+	rest := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
 
-	if scheme, rest, found := strings.Cut(trimmed, "://"); found {
-		_ = scheme
-		if _, after, hasUser := strings.Cut(rest, "@"); hasUser {
-			rest = after
-		}
-		return rest
+	hasScheme := false
+	if _, after, found := strings.Cut(rest, "://"); found {
+		rest, hasScheme = after, true
+	}
+	// Either form may carry a user, which names who connects rather than what
+	// is connected to.
+	if _, after, found := strings.Cut(rest, "@"); found {
+		rest = after
 	}
 
-	// The scp-like form, git@host:owner/repo, which has no scheme.
-	if _, rest, found := strings.Cut(trimmed, "@"); found {
-		if host, path, ok := strings.Cut(rest, ":"); ok {
-			return host + "/" + path
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
+		host, tail := rest[:i], rest[i+1:]
+		switch {
+		case hasScheme:
+			// ssh://git@host:22/owner/repo. A port names how to reach the
+			// project, not which project it is.
+			if port, path, found := strings.Cut(tail, "/"); found && isPort(port) {
+				rest = host + "/" + path
+			}
+		case !strings.Contains(host, "/"):
+			// The scp-like form, host:owner/repo, with or without a user,
+			// which git recognizes by a colon ahead of the first slash.
+			rest = host + "/" + tail
 		}
 	}
-	return trimmed
+	return strings.ToLower(rest)
+}
+
+func isPort(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // HasRemote reports whether the named remote is configured.

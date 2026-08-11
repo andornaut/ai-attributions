@@ -15,6 +15,9 @@ func TestProject(t *testing.T) {
 		{"ssh://git@github.com/andornaut/gog.git", "github.com/andornaut/gog"},
 		{"https://user@example.com/team/repo.git", "example.com/team/repo"},
 		{"git@github.com:andornaut/gog.git/", "github.com/andornaut/gog"},
+		{"github.com:andornaut/gog.git", "github.com/andornaut/gog"},
+		{"ssh://git@github.com:22/andornaut/gog.git", "github.com/andornaut/gog"},
+		{"git@github.com:Andornaut/Gog.git", "github.com/andornaut/gog"},
 		{"/srv/git/mirror.git", "/srv/git/mirror"},
 		{"", ""},
 	}

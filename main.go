@@ -160,7 +160,11 @@ func run(argv []string) error {
 		return restoreBackup(repo, stamp)
 	}
 
-	if upstream, isFork := forkUpstream(repo); isFork {
+	upstream, isFork, err := forkUpstream(repo, cfg.remote)
+	if err != nil {
+		return err
+	}
+	if isFork {
 		reportFork(repo, upstream)
 		return nil
 	}
@@ -271,24 +275,52 @@ func scan(repo *gitexec.Repo, cfg config) error {
 
 // forkUpstream returns the remote through which a fork tracks the project it
 // was forked from. A remote named upstream is the convention that git and gh
-// set up; a second remote pointing at a different project is the general case.
-func forkUpstream(repo *gitexec.Repo) (gitexec.Remote, bool) {
+// set up; a remote that has been fetched from and points at another project is
+// the general case. Both are measured against own, the remote the current
+// branch tracks, whose project is this repository's own.
+func forkUpstream(repo *gitexec.Repo, own string) (gitexec.Remote, bool, error) {
 	remotes, err := repo.Remotes()
-	if err != nil || len(remotes) < 2 {
-		return gitexec.Remote{}, false
+	if err != nil {
+		return gitexec.Remote{}, false, err
 	}
+	if len(remotes) < 2 {
+		return gitexec.Remote{}, false, nil
+	}
+	mine := ownProject(remotes, own)
 
 	for _, remote := range remotes {
-		if remote.Name == "upstream" {
-			return remote, true
+		if remote.Name == "upstream" && remote.Project != mine {
+			return remote, true, nil
 		}
 	}
 	for _, remote := range remotes {
-		if remote.Project != remotes[0].Project {
-			return remote, true
+		if remote.Project == mine {
+			continue
+		}
+		// A remote that has never been fetched from, a deploy target for
+		// instance, has brought no history here, so none of this repository's
+		// commits came from the project it names.
+		refs, err := repo.RemoteRefs(remote.Name)
+		if err != nil {
+			return gitexec.Remote{}, false, err
+		}
+		if len(refs) > 0 {
+			return remote, true, nil
 		}
 	}
-	return gitexec.Remote{}, false
+	return gitexec.Remote{}, false, nil
+}
+
+// ownProject returns the project the named remote points at, which the other
+// remotes are compared against. A repository whose branch tracks nothing falls
+// back to the first remote, since configuration order is all there is to go on.
+func ownProject(remotes []gitexec.Remote, own string) string {
+	for _, remote := range remotes {
+		if remote.Name == own {
+			return remote.Project
+		}
+	}
+	return remotes[0].Project
 }
 
 // reportFork says why the repository was passed over. A fork's history is

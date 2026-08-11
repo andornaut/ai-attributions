@@ -199,7 +199,7 @@ skipping /home/andornaut/src/github.com/andornaut/qmk_firmware: a fork, tracking
 history that arrives from another project is not this repository's to rewrite
 ```
 
-A repository counts as a fork when it has a remote named `upstream`, which is what `git` and `gh repo fork` set up, or when a second remote points at a different project. Remote URLs are compared as `host/owner/repo`, so the same project over ssh and https is one project and a mirror of your own repository is not a fork.
+A repository counts as a fork when it has a remote named `upstream` pointing at a different project, which is what `git` and `gh repo fork` set up, or when another remote it has fetched from points at a different project. The project those are measured against is the one the current branch's remote points at, `origin` by default. Remote URLs are compared as `host/owner/repo` with case folded, so the same project over ssh and https is one project and a mirror of your own repository is not a fork. A remote that has never been fetched from, a deploy target for instance, has brought no history here, so it does not count either.
 
 Nothing is reported and the exit status is 0, including under `--exit-code`, so a fork does not fail a CI gate over commits it was never going to fix. `backups` and `restore` still work, since they only put back refs this tool saved.
 
