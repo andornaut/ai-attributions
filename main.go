@@ -186,8 +186,8 @@ func parseFlags(argv []string) (config, string, error) {
 	switch {
 	case flags.NArg() > 1:
 		return cfg, "", fmt.Errorf("expected at most one repo-path, got %d arguments", flags.NArg())
-	case cfg.noTrailers && cfg.noEmdashes && cfg.noIdentity:
-		return cfg, "", fmt.Errorf("-no-trailers, -no-emdashes and -no-identity together leave nothing to do")
+	case cfg.noTrailers && cfg.noIdentity:
+		return cfg, "", fmt.Errorf("-no-trailers and -no-identity together leave nothing that can move a commit, since an emdash never does on its own")
 	case cfg.push && !cfg.apply:
 		return cfg, "", fmt.Errorf("-push needs -apply; there is nothing to push until the history is rewritten")
 	case cfg.check && cfg.apply:

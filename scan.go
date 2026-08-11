@@ -23,6 +23,9 @@ type findings struct {
 	// len(changes): an agent identity with nowhere to move to is reported and
 	// counted, but produces no change.
 	flagged int
+	// emdashesLeft counts commits whose only finding is an emdash, which is
+	// not enough on its own to move a commit.
+	emdashesLeft int
 }
 
 // detail is one commit's findings, kept for -verbose.
@@ -42,6 +45,11 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		commits:    len(commits),
 	}
 
+	// An emdash is never a reason to rewrite a commit. It is cleaned up only on
+	// a commit that an attribution is already moving, so that the number of
+	// commits changing hash is decided by attributions alone.
+	attribution := clean.Options{Trailers: opts.Trailers}
+
 	for _, commit := range commits {
 		var change rewrite.Change
 		item := detail{commit: commit}
@@ -50,19 +58,19 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		// The rewrite carries messages as JSON, which cannot hold bytes that
 		// are not valid UTF-8 without replacing them. Such a message is left
 		// exactly as it is, though the identities beside it can still be fixed.
-		if utf8.ValidString(commit.Message) {
-			if got := clean.Inspect(opts, commit.Message); !got.Empty() {
-				change.Message = clean.Message(opts, commit.Message)
+		readable := utf8.ValidString(commit.Message)
+		if !readable {
+			found.skipped++
+		}
+
+		if readable {
+			if got := clean.Inspect(attribution, commit.Message); !got.Empty() {
 				flagged = true
 				item.removedLines = got.RemovedLines
-				item.changedLines = got.ChangedLines
-				found.emdashes += len(got.ChangedLines)
 				for _, line := range got.RemovedLines {
 					found.removed[strings.TrimSpace(line)]++
 				}
 			}
-		} else {
-			found.skipped++
 		}
 
 		if who.enabled {
@@ -84,6 +92,20 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			}
 			for _, label := range item.identities {
 				found.identities[label]++
+			}
+		}
+
+		// The message is rewritten with the full set of transformations only
+		// once something else about the commit has earned the rewrite.
+		if readable {
+			if flagged {
+				if got := clean.Inspect(opts, commit.Message); !got.Empty() {
+					change.Message = clean.Message(opts, commit.Message)
+					item.changedLines = got.ChangedLines
+					found.emdashes += len(got.ChangedLines)
+				}
+			} else if opts.Emdashes && !clean.Inspect(opts, commit.Message).Empty() {
+				found.emdashesLeft++
 			}
 		}
 
@@ -110,6 +132,7 @@ func (f findings) report(verbose bool, refs []string) {
 	scope := strings.Join(refs, ", ")
 	if f.flagged == 0 {
 		fmt.Printf("no AI attributions in %d commits, across %s\n", f.commits, scope)
+		f.reportEmdashesLeft()
 		f.reportSkipped()
 		return
 	}
@@ -134,8 +157,9 @@ func (f findings) report(verbose bool, refs []string) {
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		fmt.Printf("\nemdash rewrites\n%6d  lines\n", f.emdashes)
+		fmt.Printf("\nemdash rewrites, on commits an attribution is already moving\n%6d  lines\n", f.emdashes)
 	}
+	f.reportEmdashesLeft()
 	f.reportSkipped()
 	if !verbose {
 		fmt.Println("\npass -verbose to list the commits behind these counts")
@@ -150,6 +174,20 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	for _, key := range sortedByCount(tally) {
 		fmt.Printf("%6d  %s\n", tally[key], key)
 	}
+}
+
+// reportEmdashesLeft accounts for the emdashes the run deliberately did not
+// touch, so that leaving them reads as a decision rather than an oversight.
+func (f findings) reportEmdashesLeft() {
+	switch f.emdashesLeft {
+	case 0:
+		return
+	case 1:
+		fmt.Print("\n1 commit carries an emdash and no attribution, so it is left alone;\n")
+	default:
+		fmt.Printf("\n%d commits carry an emdash and no attribution, so they are left alone;\n", f.emdashesLeft)
+	}
+	fmt.Println("rewriting for a typographic fix would move commits that nothing else moves")
 }
 
 func (f findings) reportSkipped() {

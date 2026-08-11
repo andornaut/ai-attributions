@@ -1,10 +1,10 @@
 # ai-attributions
 
-Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the emdashes that AI-written commit messages leave behind, and the agent identities on the commits themselves.
+Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the agent identities on the commits themselves, and the emdashes that ride along on those same commits.
 
 ```console
 $ ai-attributions ~/src/example
-2 of 4 commits carry AI attributions, across refs/heads/main
+2 of 5 commits carry AI attributions, across refs/heads/main
 
 removed lines
      2  Co-Authored-By: Claude <noreply@anthropic.com>
@@ -14,16 +14,20 @@ identities
      1  author Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
      1  committer Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
 
-emdash rewrites
+emdash rewrites, on commits an attribution is already moving
      2  lines
+
+1 commit carries an emdash and no attribution, so it is left alone;
+rewriting for a typographic fix would move commits that nothing else moves
 
 pass -verbose to list the commits behind these counts
 
-refs/heads/main: 3 of 4 commits will change hash, starting at b8f132701d4f 2026-08-11 feat(parser): accept empty payloads
+refs/heads/main: 4 of 5 commits will change hash, starting at d8f29bde64a2 2026-08-11 feat(parser): accept empty payloads
 
 remote branches carrying attributions that are not in scope
      1 of 1 commits  refs/remotes/origin/agent-work
 check one out to rewrite it: git switch -c <name> origin/<name>
+these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that
 
 nothing was rewritten. Pass -apply to rewrite the history
 ```
@@ -32,6 +36,8 @@ Scanning is what it does by default. `-apply` rewrites the history with [git-fil
 
 > [!IMPORTANT]
 > Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history. The count is printed before anything is rewritten.
+
+A repository with no attributions is left alone, whatever its punctuation. A tool that rewrote 289 of 482 commits to fix ten emdashes would cost more than it fixed, and on a released project it would orphan every version tag.
 
 ## What it removes
 
@@ -83,7 +89,9 @@ Re-attribution is the one part that needs an identity to move a commit to. Scann
 
 ### Emdashes
 
-Emdashes, endashes, figure dashes and horizontal bars are replaced by what the dash is doing.
+An emdash is never a reason to rewrite a commit. It is cleaned up only on a commit that an attribution is already moving, so the number of commits changing hash is decided by attributions alone and a typographic fix never widens it. A commit whose only blemish is an emdash keeps it, and the report says how many were left that way.
+
+Where a commit has earned the rewrite, emdashes, endashes, figure dashes and horizontal bars are replaced by what the dash is doing.
 
 Before | After | Rule
 --- | --- | ---
