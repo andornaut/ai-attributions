@@ -1,10 +1,14 @@
 name: AI attributions
 
-# Pull requests only. A push to main re-cuts the release this action installs,
-# so gating that push would race the build that produces what it runs.
+# Every branch, not just pull requests: work lands on main directly as often as
+# it arrives through one. A push to main re-cuts the release this action
+# installs, so a run here installs the previous one, which is the build every
+# other repository is running anyway.
 on:
+  push:
+    branches: ["**"]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
