@@ -196,14 +196,17 @@ func (f findings) reportSkipped() {
 // commit that changes hash. Every descendant of a changed commit gets a new
 // hash, so the set is what a ref pointing into this history has to be measured
 // against.
-func (f findings) reportRadius(repo *gitexec.Repo, refs []string) (map[string]bool, error) {
+func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (map[string]bool, error) {
 	moved := map[string]bool{}
 	if len(f.changes) == 0 {
 		return moved, nil
 	}
 	fmt.Println()
 	for _, ref := range refs {
-		graph, err := repo.Graph(ref)
+		// The same range the commits were read from. A change can only be in
+		// scope, so nothing below the base can be dirty, and walking to the
+		// root would read a whole history to count a branch's few commits.
+		graph, err := repo.Graph(rangeSpec(cfg, ref))
 		if err != nil {
 			return nil, err
 		}

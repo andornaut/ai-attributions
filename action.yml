@@ -20,7 +20,7 @@ inputs:
       action.yml was cut with, so a workflow on @v1 moves binary and action
       together. dev is the build re-cut on every push to main.
     required: false
-    default: v1.0.2
+    default: v1.0.3
   path:
     description: The repository to scan, relative to the workspace.
     required: false
@@ -92,55 +92,75 @@ runs:
           git fetch --quiet --no-tags --unshallow origin
         fi
 
+        # The first source that answers wins. A push is measured against where
+        # the branch stood before it, so the run answers for the commits that
+        # arrived; a new branch and a force push have no such commit to read.
+        # The default branch answers for a branch cut from it, and cannot answer
+        # for a push to the default branch itself, which is the branch being
+        # pushed: that one falls through to the whole history.
         base="$INPUT_BASE"
-        if [ -z "$base" ] && [ -n "$PR_BASE_REF" ]; then
-          base="origin/$PR_BASE_REF"
-        fi
-        # A push is measured against where the branch stood before it, so the
-        # run answers for the commits that arrived. A new branch and a force
-        # push have no such commit, and fall through to the default branch.
-        if [ -z "$base" ] && [ "${PUSH_BEFORE:-}" != "" ] &&
-          [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] &&
-          git rev-parse --quiet --verify "$PUSH_BEFORE^{commit}" >/dev/null; then
-          base="$PUSH_BEFORE"
-        fi
-        if [ -z "$base" ] && [ -n "$DEFAULT_BRANCH" ]; then
-          base="origin/$DEFAULT_BRANCH"
+        if [ -z "$base" ]; then
+          if [ -n "$PR_BASE_REF" ]; then
+            base="origin/$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE" ] &&
+            [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] &&
+            git rev-parse --quiet --verify "$PUSH_BEFORE^{commit}" >/dev/null; then
+            base="$PUSH_BEFORE"
+          elif [ -n "$DEFAULT_BRANCH" ] && [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            base="origin/$DEFAULT_BRANCH"
+          fi
         fi
 
-        case "$base" in
-          origin/*)
-            branch="${base#origin/}"
-            git fetch --quiet --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
-            ;;
-        esac
-        if [ -n "$base" ] && ! git rev-parse --quiet --verify "$base^{commit}" >/dev/null; then
+        # Fetched only when the checkout does not already carry it: fetch-depth:
+        # 0 brings every branch, and a shallower one brings only what is pushed.
+        base_sha=""
+        if [ -n "$base" ]; then
+          base_sha=$(git rev-parse --quiet --verify "$base^{commit}" || true)
+          if [ -z "$base_sha" ]; then
+            case "$base" in
+              origin/*) git fetch --quiet --no-tags origin "+refs/heads/${base#origin/}:refs/remotes/$base" 2>/dev/null || true ;;
+            esac
+            base_sha=$(git rev-parse --quiet --verify "$base^{commit}" || true)
+          fi
+        fi
+        # A base this action guessed can be wrong about a repository, so it
+        # widens rather than fails. One the caller named is a mistake worth
+        # stopping for, since widening would scan history that predates whatever
+        # they were pointing at.
+        if [ -n "$base" ] && [ -z "$base_sha" ]; then
+          if [ -n "$INPUT_BASE" ]; then
+            echo "::error::base: $base names no commit here; check the ref, or set fetch-depth: 0 on actions/checkout"
+            exit 1
+          fi
           echo "::warning::$base names no commit here, so the whole history is scanned instead"
           base=""
         fi
+
         # The scan reads the current branch, and a pull request is checked out
         # at a merge commit with HEAD detached. Its second parent is the branch
         # itself, which is the history the pull request is asking to merge.
-        if ! git symbolic-ref --quiet HEAD >/dev/null; then
+        branch=$(git symbolic-ref --quiet --short HEAD || true)
+        if [ -z "$branch" ]; then
           head=HEAD
           # A checkout of the base repository, as pull_request_target does, has
           # no commit under that sha and is scanned where it stands.
-          if [ -n "${PR_HEAD_SHA:-}" ] && git rev-parse --quiet --verify "$PR_HEAD_SHA^{commit}" >/dev/null; then
+          if [ -n "$PR_HEAD_SHA" ] && git rev-parse --quiet --verify "$PR_HEAD_SHA^{commit}" >/dev/null; then
             head="$PR_HEAD_SHA"
           fi
-          git switch --quiet --force-create "${PR_HEAD_REF:-ai-attributions-scan}" "$head"
+          branch="${PR_HEAD_REF:-ai-attributions-scan}"
+          git switch --quiet --force-create "$branch" "$head"
         fi
-        echo "AI_ATTRIBUTIONS_BRANCH=$(git symbolic-ref --short HEAD)" >>"$GITHUB_ENV"
+        echo "AI_ATTRIBUTIONS_BRANCH=$branch" >>"$GITHUB_ENV"
 
-        # Measured once the branch is attached, since a pull request is checked
-        # out at a merge commit that equals no base. A base that is HEAD itself
-        # measures nothing, which is what a force push to the default branch
-        # produces: the commit it started from is not in the checkout, and the
-        # fallback is the branch being pushed. Read the whole history there,
-        # rather than passing a run that looked at no commits.
-        if [ -n "$base" ] && [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse "HEAD^{commit}")" ]; then
-          echo "::warning::$base is HEAD itself, so the whole history is scanned instead"
-          base=""
+        # Compared once the branch is attached, a pull request having been
+        # checked out at a merge commit that equals no base. A branch level with
+        # its base adds nothing, which is a pass rather than a finding.
+        if [ -n "$base" ] && [ "$base_sha" = "$(git rev-parse "HEAD^{commit}")" ]; then
+          if [ -n "$INPUT_BASE" ]; then
+            echo "::error::base: $base is HEAD itself, so there is nothing to measure"
+            exit 1
+          fi
+          echo "::warning::$base is HEAD itself, so there are no added commits to scan"
         fi
         echo "AI_ATTRIBUTIONS_BASE=$base" >>"$GITHUB_ENV"
 
@@ -156,16 +176,15 @@ runs:
 
         cd "$AI_ATTRIBUTIONS_REPO" || exit 1
         # --verbose names each commit, which is what whoever fixes them needs.
+        set -- scan --exit-code --verbose
         if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
-          set -- scan --exit-code --verbose --base "$AI_ATTRIBUTIONS_BASE"
-        else
-          set -- scan --exit-code --verbose
+          set -- "$@" --base "$AI_ATTRIBUTIONS_BASE"
         fi
 
         # A runner has no git identity, and a scan that cannot name one says so
         # on every run. Whoever pushed is the answer to "re-attributed to whom",
         # and the address is the one GitHub keeps for them.
-        identity="${INPUT_IDENTITY:-}"
+        identity="$INPUT_IDENTITY"
         if [ -z "$identity" ] && [ -n "${GITHUB_ACTOR:-}" ]; then
           identity="$GITHUB_ACTOR <${GITHUB_ACTOR_ID:+$GITHUB_ACTOR_ID+}$GITHUB_ACTOR@users.noreply.github.com>"
         fi

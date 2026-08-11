@@ -231,53 +231,6 @@ func TestPublishable(t *testing.T) {
 	}
 }
 
-// A tag has no remote-tracking ref to lease against, so the remote's value is
-// read and compared before the push. A tag standing where the rewrite found it
-// is safe to force; one standing anywhere else holds a value this run never
-// saw, and forcing it would drop whatever that is.
-func TestStaleRef(t *testing.T) {
-	tests := []struct {
-		name    string
-		values  map[string]string
-		targets []target
-		want    string
-	}{
-		{
-			name:    "a tag where the rewrite found it is not stale",
-			values:  map[string]string{"refs/tags/v1": "old"},
-			targets: []target{{ref: "refs/tags/v1", hash: "old"}},
-		},
-		{
-			name:    "a tag the remote does not carry is created by the push",
-			values:  map[string]string{},
-			targets: []target{{ref: "refs/tags/v1", hash: "old"}},
-		},
-		{
-			name:    "a tag the remote moved is stale",
-			values:  map[string]string{"refs/tags/v1": "theirs"},
-			targets: []target{{ref: "refs/tags/v1", hash: "old"}},
-			want:    "refs/tags/v1",
-		},
-		{
-			name:    "a leased ref is answered for by its lease, not by this check",
-			values:  map[string]string{"refs/heads/main": "theirs"},
-			targets: []target{{ref: "refs/heads/main", hash: "old", lease: "old"}},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stale, _, found := staleRef(tt.values, tt.targets)
-			if found != (tt.want != "") {
-				t.Fatalf("staleRef() found = %v, want %v", found, tt.want != "")
-			}
-			if found && stale.ref != tt.want {
-				t.Errorf("staleRef() = %q, want %q", stale.ref, tt.want)
-			}
-		})
-	}
-}
-
 // A branch is leased against the value the remote held at the last fetch, so a
 // remote that has moved since rejects the push. A ref with no remote-tracking
 // counterpart has no such value and is forced, which + marks.
@@ -290,14 +243,21 @@ func TestPushArgs(t *testing.T) {
 		{
 			name:    "a branch is leased against its remote-tracking ref",
 			targets: []target{{ref: "refs/heads/main", hash: "new", lease: "old"}},
-			want: []string{"push", "origin",
+			want: []string{"push", "--atomic", "origin",
 				"--force-with-lease=refs/heads/main:old",
 				"refs/heads/main:refs/heads/main"},
 		},
 		{
-			name:    "a ref with no lease is forced",
+			name:    "a ref the remote does not carry is forced, there being nothing to overwrite",
 			targets: []target{{ref: "refs/tags/v1", hash: "new"}},
-			want:    []string{"push", "origin", "+refs/tags/v1:refs/tags/v1"},
+			want:    []string{"push", "--atomic", "origin", "+refs/tags/v1:refs/tags/v1"},
+		},
+		{
+			name:    "a tag leased against the value read from the remote",
+			targets: []target{{ref: "refs/tags/v1", hash: "new", lease: "theirs"}},
+			want: []string{"push", "--atomic", "origin",
+				"--force-with-lease=refs/tags/v1:theirs",
+				"refs/tags/v1:refs/tags/v1"},
 		},
 		{
 			name: "every lease is stated before any ref is pushed",
@@ -306,7 +266,7 @@ func TestPushArgs(t *testing.T) {
 				{ref: "refs/tags/v1", hash: "new"},
 				{ref: "refs/heads/dev", hash: "new", lease: "older"},
 			},
-			want: []string{"push", "origin",
+			want: []string{"push", "--atomic", "origin",
 				"--force-with-lease=refs/heads/main:old",
 				"--force-with-lease=refs/heads/dev:older",
 				"refs/heads/main:refs/heads/main",

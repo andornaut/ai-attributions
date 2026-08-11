@@ -266,7 +266,6 @@ func (r *Repo) RemoteRefs(remote string) ([]string, error) {
 	return refs, nil
 }
 
-// Describe returns a commit's date and subject.
 // RemoteValues returns the commit each of the named refs points at on the
 // remote, read over the network. A tag has no remote-tracking ref to read
 // instead, and a ref the remote does not carry is left out of the map rather
@@ -290,6 +289,7 @@ func (r *Repo) RemoteValues(remote string, refs []string) (map[string]string, er
 	return values, nil
 }
 
+// Describe returns a commit's date and subject.
 func (r *Repo) Describe(hash string) string {
 	out, err := r.Output("log", "-1", "--format=%cs %s", hash)
 	if err != nil {

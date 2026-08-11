@@ -97,6 +97,10 @@ type target struct {
 // this run did not produce over whatever the remote holds.
 func (t target) moved() bool { return t.after != "" && t.after != t.hash }
 
+// unleased reports whether there is no value to hold the remote to when pushing
+// this ref.
+func (t target) unleased() bool { return t.lease == "" }
+
 // identity is the name and address to put on a commit an agent authored. Both
 // parts are set together or not at all, so a rewrite cannot assign half of one.
 type identity struct {
@@ -253,17 +257,20 @@ func scan(repo *gitexec.Repo, cfg config) error {
 	if err != nil {
 		return err
 	}
-	if len(refs) == 0 {
-		fmt.Println("no commits to inspect")
-		return nil
-	}
-
 	commits, err := commitsInScope(repo, cfg, refs)
 	if err != nil {
 		return err
 	}
 	if len(commits) == 0 {
-		fmt.Println("no commits to inspect")
+		// The two ways to reach this say different things: a repository with
+		// nothing to walk, and a branch level with the base it was measured
+		// against.
+		if cfg.base == "" {
+			fmt.Println("no commits to inspect")
+		} else {
+			fmt.Printf("no commits to inspect: %s adds nothing over %s\n",
+				strings.Join(refs, ", "), cfg.base)
+		}
 		return nil
 	}
 	// Trailers are the point of the tool. Emdashes are asked for: they move no
@@ -272,7 +279,7 @@ func scan(repo *gitexec.Repo, cfg config) error {
 
 	found := inspect(opts, who, commits)
 	found.report(cfg.verbose, scopeLabel(cfg, refs))
-	moved, err := found.reportRadius(repo, refs)
+	moved, err := found.reportRadius(repo, cfg, refs)
 	if err != nil {
 		return err
 	}
@@ -487,6 +494,11 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 // branch it was cut from so that a run answers for the commits it introduced,
 // which are the ones whoever wrote them can still rewrite.
 func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Commit, error) {
+	// A repository with no branch to walk. git log with no ref would read HEAD,
+	// which is the one thing there is not.
+	if len(refs) == 0 {
+		return nil, nil
+	}
 	if cfg.base == "" {
 		return repo.Commits(refs)
 	}
@@ -557,12 +569,17 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 		fmt.Println("\nno ref moved, so there is nothing to push")
 		return nil
 	}
+	// Read before reporting, so what is named as unleased is what the push
+	// really cannot hold the remote to. The read needs the network, which only
+	// the push itself is going to use.
+	if cfg.push {
+		if err := leaseRemote(repo, cfg.remote, publish); err != nil {
+			return err
+		}
+	}
 	reportUnleased(publish)
 
 	if cfg.push {
-		if err := checkUnleased(repo, cfg.remote, publish); err != nil {
-			return err
-		}
 		fmt.Printf("\npushing to %s\n", cfg.remote)
 		return repo.Run(pushArgs(cfg.remote, publish)...)
 	}
@@ -579,13 +596,20 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 func refSpecs(cfg config, targets []target) []string {
 	specs := make([]string, 0, len(targets))
 	for _, t := range targets {
-		if cfg.base == "" {
-			specs = append(specs, t.ref)
-			continue
-		}
-		specs = append(specs, cfg.base+".."+t.ref)
+		specs = append(specs, rangeSpec(cfg, t.ref))
 	}
 	return specs
+}
+
+// rangeSpec names one ref's history, bounded by the base when there is one.
+// Both the rewrite and the report that counts what it moves ask this question,
+// and a range answered one way in one place and another way in the other would
+// have them disagree about what the run covers.
+func rangeSpec(cfg config, ref string) string {
+	if cfg.base == "" {
+		return ref
+	}
+	return cfg.base + ".." + ref
 }
 
 func checkRewritable(repo *gitexec.Repo, cfg config) error {
@@ -689,7 +713,7 @@ func publishable(targets []target) []target {
 func reportUnleased(targets []target) {
 	unleased := unleasedRefs(targets)
 	if len(unleased) > 0 {
-		fmt.Printf("\nno remote-tracking ref for %s, so these are forced; the remote is read once beforehand and the push stops if one has moved\n",
+		fmt.Printf("\nno value on the remote to hold %s to, so these are forced\n",
 			strings.Join(unleased, ", "))
 	}
 }
@@ -697,58 +721,50 @@ func reportUnleased(targets []target) {
 func unleasedRefs(targets []target) []string {
 	var unleased []string
 	for _, t := range targets {
-		if t.lease == "" {
+		if t.unleased() {
 			unleased = append(unleased, t.ref)
 		}
 	}
 	return unleased
 }
 
-// checkUnleased stops a push that would force a ref over a value this run never
-// saw. A tag has no remote-tracking ref to lease against, so the remote is read
-// once and compared instead. That leaves the moment between the read and the
-// push uncovered, which a lease per ref would close; a repository where more
-// than one person moves tags is the one that needs it.
-func checkUnleased(repo *gitexec.Repo, remote string, targets []target) error {
-	unleased := unleasedRefs(targets)
-	if len(unleased) == 0 {
+// leaseRemote fills in a lease for every ref that has no remote-tracking
+// counterpart to read one from, a tag for instance, by reading what the remote
+// holds. --force-with-lease takes that value explicitly, so the push itself
+// refuses a ref standing somewhere this run never saw, rather than a check
+// beforehand that a ref could move behind.
+func leaseRemote(repo *gitexec.Repo, remote string, targets []target) error {
+	refs := unleasedRefs(targets)
+	if len(refs) == 0 {
 		return nil
 	}
-	values, err := repo.RemoteValues(remote, unleased)
+	values, err := repo.RemoteValues(remote, refs)
 	if err != nil {
 		return err
 	}
-	// The rewrite is already done and backed up by the time the push runs, and
-	// a second run would find the history clean and publish nothing, so the way
-	// out is the push itself rather than another run.
-	if stale, held, found := staleRef(values, targets); found {
-		return fmt.Errorf("%s is %s on %s, not the %s this run rewrote.\nThe rewrite here stands. Fetch that ref, work out what it carries, then publish with:\n\n    git %s",
-			stale.ref, gitexec.Short(held), remote, gitexec.Short(stale.hash),
-			strings.Join(pushArgs(remote, targets), " "))
-	}
-	return nil
-}
 
-// staleRef returns the first unleased ref the remote holds at a value other
-// than the one the rewrite started from. A ref the remote does not carry is
-// created by the push and has nothing to overwrite.
-func staleRef(values map[string]string, targets []target) (target, string, bool) {
-	for _, t := range targets {
-		if t.lease != "" {
+	for i, t := range targets {
+		if !t.unleased() {
 			continue
 		}
-		held, carried := values[t.ref]
-		if carried && held != t.hash {
-			return t, held, true
+		// Leased against the value the rewrite started from, not the value just
+		// read: the remote holding something else is the case to refuse, and a
+		// lease naming what is already there would agree to overwrite it. A ref
+		// the remote does not carry stays unleased, the push creating it.
+		if _, carried := values[t.ref]; carried {
+			targets[i].lease = t.hash
 		}
 	}
-	return target{}, "", false
+	return nil
 }
 
 // pushArgs builds the push. A ref with a known remote value is leased against
 // it; a ref without one is forced, since there is no value to compare to.
 func pushArgs(remote string, targets []target) []string {
-	args := []string{"push", remote}
+	// --atomic so that a ref whose lease fails takes the rest of the push down
+	// with it. Half a published rewrite is a branch on new history with a tag
+	// still naming the old.
+	args := []string{"push", "--atomic", remote}
 	for _, t := range targets {
 		if t.lease != "" {
 			args = append(args, fmt.Sprintf("--force-with-lease=%s:%s", t.ref, t.lease))

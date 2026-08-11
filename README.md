@@ -44,7 +44,7 @@ go install github.com/andornaut/ai-attributions@latest
 Or unpack a release archive, which needs no Go. Any release tag goes in the URL; `dev` is the rolling one, re-cut on every push to `main`.
 
 ```bash
-curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.2/ai-attributions_linux_x86_64.tar.gz \
+curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.3/ai-attributions_linux_x86_64.tar.gz \
     | tar -xzf - -C ~/.local/bin ai-attributions
 ```
 
@@ -252,11 +252,11 @@ restored. A published rewrite still needs a force push to undo on the remote
 
 The push covers the refs the rewrite moved, and only those: a ref whose commits carried no change keeps its hash, and forcing it would put a value this run never produced on the remote.
 
-A branch is pushed with `--force-with-lease` against its remote-tracking ref, so a remote that moved since the last fetch rejects the push. A ref with no remote-tracking counterpart, a tag for instance, has nothing to lease against and is forced; those refs are named in the output.
+Every ref is pushed with `--force-with-lease`, so a remote holding anything other than what the rewrite started from rejects the push. A branch leases against its remote-tracking ref. A tag has no such counterpart, so `git ls-remote` reads the remote once to see whether it carries the tag at all, and one that it carries is leased against the pre-rewrite commit through `--force-with-lease=<ref>:<value>`, which takes the expected value explicitly. A tag the remote does not carry is created by the push, with nothing to overwrite; those refs are named in the output.
 
-A carried tag is published with the rewrite rather than held back: a tag left on the remote naming a commit no branch there reaches is the state the local repoint exists to avoid, and leaving the remote in it would need a second command. Since a tag cannot be leased, the remote's value for every forced ref is read once with `git ls-remote` before the push, and a ref standing anywhere other than where the rewrite found it stops the push instead of being overwritten.
+The push is `--atomic`, so a ref whose lease fails takes the rest down with it: half a published rewrite is a branch on new history beside a tag still naming the old.
 
-That check covers a tag someone else moved, up to the moment it is read; a lease is atomic and this is not, so a tag moved between the read and the push is still overwritten. Leasing each tag against `ls-remote` would close that too, and is the change to make in a repository where more than one person moves tags.
+A carried tag is published with the rewrite rather than held back, since a tag left on the remote naming a commit no branch there reaches is the state the local repoint exists to avoid, and leaving the remote in it would need a second command.
 
 ## Limitations
 
