@@ -32,6 +32,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Identities](#identities) - agent-authored commits are re-attributed, which is what GitHub's contributor list reads
 - [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then only on commits an attribution already moves
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
+- [Several repositories](#sweeping-several-repositories) in one run, summarized a line each
 - [`--exit-code`](#catching-them-before-they-land) exits 1 when attributions are found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
 - [Backups](#backups) - the pre-rewrite refs are saved, and `restore` puts one run back
 
@@ -44,7 +45,7 @@ go install github.com/andornaut/ai-attributions@latest
 Or unpack a release archive, which needs no Go. Any release tag goes in the URL; `dev` is the rolling one, re-cut on every push to `main`.
 
 ```bash
-curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.4/ai-attributions_linux_x86_64.tar.gz \
+curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.1.0/ai-attributions_linux_x86_64.tar.gz \
     | tar -xzf - -C ~/.local/bin ai-attributions
 ```
 
@@ -59,13 +60,13 @@ pip install --user git-filter-repo   # or: apt install git-filter-repo
 Run `ai-attributions --help` to view the available commands and flags:
 
 ```text
-usage: ai-attributions [command] [flags] [repo-path]
+usage: ai-attributions [command] [flags] [repo-path...]
 
 AI attributions in commits are ads, remove them!
 
 Reports the AI attributions in a repository's history. Nothing is rewritten
 unless the apply command asks for it. repo-path defaults to the current
-directory.
+directory; more than one path runs each in turn and summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -74,22 +75,37 @@ commands:
   restore <timestamp>  put the refs saved by one run back
   version              print the version
 
+exit status:
+  0  nothing found
+  1  attributions found, with --exit-code
+  2  the run could not complete
+  3  nothing was examined, a fork for instance, with --exit-code
+
 flags:
-  --all                every local branch and tag, not just the current branch
-  --base ref           only the commits the refs in scope add over this ref
-  --emdashes           also rewrite emdashes, on the commits an attribution is already moving
-  --exclude glob       skip refs matching this glob (repeatable)
-  --exit-code          exit 1 when attributions are found, as git diff does (scan only)
-  --identity identity  identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
-  --push               force push the rewritten refs (apply only)
-  --verbose            report every commit rather than a summary
+  -base ref
+    	only the commits the refs in scope add over this ref
+  -current-branch
+    	only the branch that is checked out, not every local branch and tag
+  -emdashes
+    	also rewrite emdashes, on the commits an attribution is already moving
+  -exclude glob
+    	skip refs matching this glob (repeatable)
+  -exit-code
+    	exit 1 when attributions are found, as git diff does
+  -identity identity
+    	identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
+  -push
+    	force push the rewritten refs (apply only)
+  -verbose
+    	report every commit rather than a summary
 ```
 
 ```bash
-ai-attributions ~/src/example                     # report only
-ai-attributions --verbose ~/src/example           # report, commit by commit
-ai-attributions apply ~/src/example               # rewrite the current branch
-ai-attributions apply --all --push ~/src/example  # rewrite every branch and tag, then push
+ai-attributions ~/src/example                            # report only
+ai-attributions --verbose ~/src/example                  # report, commit by commit
+ai-attributions ~/src/*                                  # sweep a directory of repositories
+ai-attributions apply --current-branch ~/src/example     # rewrite the branch that is checked out
+ai-attributions apply --push ~/src/example               # rewrite every branch and tag, then push
 ```
 
 Every flag takes one dash or two. The documentation uses two.
@@ -148,10 +164,10 @@ Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of 
 
 ### Refs in scope
 
-`scan` and `apply` cover the same refs: the current branch, or every local branch and tag under `--all`, minus anything `--exclude` matches. `--exclude` takes a glob, is repeatable, and matches the full ref or its short name, so `--exclude dev` covers `refs/tags/dev` and `--exclude agent-work` covers `refs/remotes/origin/agent-work`.
+`scan` and `apply` cover the same refs: every local branch and tag, or the branch that is checked out under `--current-branch`, minus anything `--exclude` matches. Covering the whole repository is the default because "is this repository clean" is the question the tool answers; `--current-branch` is for a caller asking about one branch, such as a CI job answering for what a push added. `--exclude` takes a glob, is repeatable, and matches the full ref or its short name, so `--exclude dev` covers `refs/tags/dev` and `--exclude agent-work` covers `refs/remotes/origin/agent-work`.
 
 ```bash
-ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
+ai-attributions apply --exclude dev --exclude 'release/*' ~/src/example
 ```
 
 `--base ref` narrows those refs to the commits they add over `ref`, which is what a branch answers for. The history it was cut from is left out of the walk, the counts and `--exit-code`, and the report names the base beside the refs.
@@ -165,7 +181,7 @@ A commit the base already carries keeps its message, its identity and its hash, 
 
 A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. Its commits are in the rewrite either way, so carrying the tag repoints it without widening what is rewritten. The scan lists the tags this covers, and a tag `--exclude` matched is repointed locally and left out of the push: exclusion decides what is scanned and published, not whether a local ref is left behind.
 
-Remote branches sit outside that set. The scan names any that carry attributions and are not already covered, below the findings and counted in none of them, including `--exit-code`. Rewriting one means checking it out first. It reads remote-tracking refs rather than the remote, so no network is needed, and a branch deleted upstream is listed until `git fetch --prune` clears it. A run given `--base` leaves that report out, since a remote branch sits outside the range rather than beside it.
+Remote branches sit outside that set. The scan names any that carry attributions and are not already covered, below the findings and counted in none of them, including `--exit-code`. Rewriting one means checking it out first. It reads remote-tracking refs rather than the remote, so no network is needed and a ref is only as current as the last fetch; `git fetch --prune` drops any whose branch is gone upstream. A ref still naming history an `apply` has already rewritten here is named separately, as a push that has not happened rather than a branch to go and clean, which the backup the rewrite saved is what makes knowable. A run given `--base` leaves that report out, since a remote branch sits outside the range rather than beside it.
 
 ### Forks
 
@@ -179,20 +195,42 @@ history that arrives from another project is not this repository's to rewrite
 
 A repository counts as a fork when it has a remote named `upstream` pointing at a different project, or another remote that points at a different project and has been fetched from. Both are measured against the project the current branch's remote points at, `origin` by default. Remote URLs are compared as `host/owner/repo` with case folded, so the same project over ssh and https is one project.
 
-Nothing is reported and the exit status is 0, including under `--exit-code`. `backups` and `restore` still work.
+Nothing is reported, and under `--exit-code` the status is 3: nothing was found because nothing was looked at, which is not the same answer as a clean repository and is not reported as one. Without `--exit-code` the status is 0. `backups` and `restore` still work.
+
+### Sweeping several repositories
+
+More than one `repo-path` runs each in turn and prints one line per repository as it finishes, followed by the full report for each one that found something. A repository that fails does not end the sweep, and keeps whatever it had already reported: an `apply` that failed at the push has still named the backup it saved. The failure itself goes to stderr, where a single run puts it, so a caller can redirect the summary and still see what went wrong.
+
+```console
+$ ai-attributions ~/src/github.com/andornaut/*
+clean    /home/andornaut/src/github.com/andornaut/gog
+found    /home/andornaut/src/github.com/andornaut/cloudflare-starter
+skipped  /home/andornaut/src/github.com/andornaut/qmk_firmware
+
+=== /home/andornaut/src/github.com/andornaut/cloudflare-starter
+2 of 5 commits carry AI attributions, across refs/heads/main
+...
+```
+
+The status is the worst of what the sweep saw: 2 if any repository failed, then 1 if any found something, then 3 if any was skipped. It does not depend on the order the paths were given in.
+
+`backups` and `restore` report rather than scan, so they have no finding to summarize and print under a `=== <path>` heading instead.
 
 ### Catching them before they land
 
-`--exit-code` reports as usual and exits 1 when anything is found, the way `git diff --exit-code` does. It needs no git identity configured, and it answers for the refs in scope, the same set `apply` rewrites. Any other failure exits 2, so a caller can tell a run that found something from one that could not look.
+`--exit-code` reports as usual and exits 1 when anything is found, the way `git diff --exit-code` does. It needs no git identity configured, and it answers for the refs in scope. On `apply` it answers the same question, so a job can tell a run that had to rewrite something from one that had nothing to do. Any other failure exits 2, so a caller can tell a run that found something from one that could not look.
 
 ```bash
-ai-attributions --exit-code                    # the whole history of this branch
-ai-attributions --exit-code --base origin/main # only the commits this branch adds
+ai-attributions --exit-code                                     # every branch and tag
+ai-attributions --exit-code --current-branch                    # the whole history of this branch
+ai-attributions --exit-code --current-branch --base origin/main # only the commits this branch adds
 ```
 
 ### GitHub Action
 
 [`action.yml`](./action.yml) is a composite action that runs the scan over the commits a branch adds and fails the job when it finds any. It is meant for branches an agent writes: the failure names each commit and the commands that take the attributions back off, in the job log and on the run summary.
+
+It scans with `--current-branch`, so it answers for the branch being built rather than for every ref the checkout happens to carry. A job fails on what the push added, not on a tag or an old branch that came along with it.
 
 ```yaml
 name: AI attributions

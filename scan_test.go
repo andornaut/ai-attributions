@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/andornaut/ai-attributions/internal/clean"
@@ -172,5 +174,84 @@ func TestIdentityWithoutSomewhereToMoveIt(t *testing.T) {
 				t.Errorf("identities = %v, want the author and the committer", found.identities)
 			}
 		})
+	}
+}
+
+// captureReport swaps the report writer for a buffer, so a test can read what a
+// run said rather than infer it from what it returned.
+func captureReport(t *testing.T, run func()) string {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	previous := out
+	out = buf
+	defer func() { out = previous }()
+	run()
+	return buf.String()
+}
+
+// A remote-tracking ref left pointing at history this tool already rewrote is a
+// push that has not happened, not a branch carrying attributions of its own. The
+// cause is only knowable from the backup the rewrite saved, so a run that cannot
+// see one states the mechanism rather than guessing at which cause it is.
+func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("remote", "add", "origin", "git@github.com:andornaut/example.git")
+	git("commit", "--quiet", "--allow-empty", "--message=attributed\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	attributed, err := repo.Resolve("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The remote still holds the commit, as it does until the rewrite is pushed.
+	git("update-ref", "refs/remotes/origin/main", attributed)
+	// The branch moves off it, as it does once the rewrite has run.
+	git("reset", "--quiet", "--hard", "HEAD~1")
+	git("commit", "--quiet", "--allow-empty", "--message=rewritten")
+
+	cfg := config{remote: "origin"}
+	opts := clean.Options{Trailers: true}
+	refs := []string{"refs/heads/main"}
+
+	report := captureReport(t, func() {
+		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(report, "not in scope") {
+		t.Errorf("with no backup saved, reportRemoteOnly() did not list the branch:\n%s", report)
+	}
+	if strings.Contains(report, "already rewritten") {
+		t.Errorf("with no backup saved, reportRemoteOnly() claimed a rewrite it cannot see:\n%s", report)
+	}
+
+	// The record the rewrite leaves behind is what makes the cause knowable.
+	git("update-ref", "refs/ai-attributions-backup/20260811T000000Z/heads/main", attributed)
+
+	report = captureReport(t, func() {
+		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(report, "already rewritten") {
+		t.Errorf("reportRemoteOnly() did not name the ref as one this repository rewrote:\n%s", report)
+	}
+	if strings.Contains(report, "not in scope") {
+		t.Errorf("reportRemoteOnly() reported rewritten history as a branch to go and clean:\n%s", report)
+	}
+
+	// A different branch sitting on main's old tip is not settled by pushing
+	// main, so matching the commit alone would suppress a branch nothing cleans.
+	git("update-ref", "refs/remotes/origin/topic", attributed)
+
+	report = captureReport(t, func() {
+		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(report, "refs/remotes/origin/topic") {
+		t.Errorf("reportRemoteOnly() left out a branch that only shares main's pre-rewrite tip:\n%s", report)
+	}
+	if !strings.Contains(report, "not in scope") {
+		t.Errorf("reportRemoteOnly() did not report the other branch as one to go and clean:\n%s", report)
 	}
 }

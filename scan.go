@@ -126,7 +126,7 @@ func mapping(field, name, address string, who identity) string {
 // scope names the history the counts answer for.
 func (f findings) report(verbose bool, scope string) {
 	if f.flagged == 0 {
-		fmt.Printf("no AI attributions in %d commits, across %s\n", f.commits, scope)
+		say("no AI attributions in %d commits, across %s\n", f.commits, scope)
 		f.reportEmdashesLeft()
 		f.reportSkipped()
 		return
@@ -134,30 +134,30 @@ func (f findings) report(verbose bool, scope string) {
 
 	if verbose {
 		for _, item := range f.details {
-			fmt.Printf("%s %s\n", item.commit.Short(), item.commit.Subject())
+			say("%s %s\n", item.commit.Short(), item.commit.Subject())
 			for _, line := range item.removedLines {
-				fmt.Printf("    - %s\n", line)
+				say("    - %s\n", line)
 			}
 			for _, change := range item.changedLines {
-				fmt.Printf("    - %s\n    + %s\n", change.Old, change.New)
+				say("    - %s\n    + %s\n", change.Old, change.New)
 			}
 			for _, label := range item.identities {
-				fmt.Printf("    ~ %s\n", label)
+				say("    ~ %s\n", label)
 			}
 		}
-		fmt.Println()
+		say("\n")
 	}
 
-	fmt.Printf("%d of %d commits carry AI attributions, across %s\n", f.flagged, f.commits, scope)
+	say("%d of %d commits carry AI attributions, across %s\n", f.flagged, f.commits, scope)
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		fmt.Printf("\nemdash rewrites, on commits an attribution is already moving\n%6d  lines\n", f.emdashes)
+		say("\nemdash rewrites, on commits an attribution is already moving\n%6d  lines\n", f.emdashes)
 	}
 	f.reportEmdashesLeft()
 	f.reportSkipped()
 	if !verbose {
-		fmt.Println("\npass --verbose to list the commits behind these counts")
+		say("\npass --verbose to list the commits behind these counts\n")
 	}
 }
 
@@ -165,9 +165,9 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	if len(tally) == 0 {
 		return
 	}
-	fmt.Printf("\n%s\n", title)
+	say("\n%s\n", title)
 	for _, key := range sortedByCount(tally) {
-		fmt.Printf("%6d  %s\n", tally[key], key)
+		say("%6d  %s\n", tally[key], key)
 	}
 }
 
@@ -176,19 +176,19 @@ func (f findings) reportEmdashesLeft() {
 	case 0:
 		return
 	case 1:
-		fmt.Print("\n1 commit carries an emdash and no attribution, so it is left alone;\n")
+		say("\n1 commit carries an emdash and no attribution, so it is left alone;\n")
 	default:
-		fmt.Printf("\n%d commits carry an emdash and no attribution, so they are left alone;\n", f.emdashesLeft)
+		say("\n%d commits carry an emdash and no attribution, so they are left alone;\n", f.emdashesLeft)
 	}
-	fmt.Println("rewriting for a typographic fix would move commits that nothing else moves")
+	say("rewriting for a typographic fix would move commits that nothing else moves\n")
 }
 
 func (f findings) reportSkipped() {
 	switch {
 	case f.skipped == 1:
-		fmt.Println("\n1 commit message was skipped because it is not valid UTF-8")
+		say("\n1 commit message was skipped because it is not valid UTF-8\n")
 	case f.skipped > 1:
-		fmt.Printf("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
+		say("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
 	}
 }
 
@@ -201,7 +201,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (m
 	if len(f.changes) == 0 {
 		return moved, nil
 	}
-	fmt.Println()
+	say("\n")
 	for _, ref := range refs {
 		// The same range the commits were read from. A change can only be in
 		// scope, so nothing below the base can be dirty, and walking to the
@@ -237,7 +237,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (m
 		if earliest == "" {
 			continue
 		}
-		fmt.Printf("%s: %d of %d commits will change hash, starting at %s %s\n",
+		say("%s: %d of %d commits will change hash, starting at %s %s\n",
 			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
 	}
 	return moved, nil
@@ -257,7 +257,12 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		return err
 	}
 
-	var lines []string
+	// A ref left behind by this tool's own rewrite is separated out below, so
+	// that the history the run just replaced is not reported as a branch of its
+	// own to go and clean.
+	saved := rewrittenHere(repo)
+
+	var lines, stale []string
 	for _, ref := range remoteRefs {
 		excluded, err := cfg.exclude.matches(ref)
 		if err != nil {
@@ -277,19 +282,76 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 			continue
 		}
 		if found := inspect(opts, who, commits); found.flagged > 0 {
+			if hash, err := repo.Resolve(ref); err == nil &&
+				saved[rewrittenKey(strings.TrimPrefix(ref, "refs/remotes/"+cfg.remote+"/"), hash)] {
+				stale = append(stale, ref)
+				continue
+			}
 			lines = append(lines, fmt.Sprintf("%6d of %d commits  %s",
 				found.flagged, len(commits), ref))
 		}
+	}
+
+	if len(stale) > 0 {
+		say("\nnaming history this repository has already rewritten locally: %s\n",
+			strings.Join(stale, ", "))
+		say("pushing the rewrite settles these; until then the remote still holds what it started from\n")
 	}
 	if len(lines) == 0 {
 		return nil
 	}
 
-	fmt.Printf("\nnot in scope, and not counted above: remote branches carrying attributions\n")
+	say("\nnot in scope, and not counted above: remote branches carrying attributions\n")
 	for _, line := range lines {
-		fmt.Println(line)
+		say("%s\n", line)
 	}
-	fmt.Printf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
-	fmt.Printf("these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that\n")
+	say("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
+	// The cause is not knowable without the network, and a scan does not use
+	// it, so the mechanism is stated rather than one guess at which it is.
+	say("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
 	return nil
 }
+
+// rewrittenHere returns the branches this tool has rewritten, each keyed with
+// the commit it pointed at beforehand. A remote-tracking ref still naming its
+// own branch's pre-rewrite tip is a push that has not happened; one that merely
+// sits on some other ref's old tip is a branch of its own, and pushing this
+// rewrite would not move it, so it is left to be reported as one.
+func rewrittenHere(repo *gitexec.Repo) map[string]bool {
+	saved := map[string]bool{}
+	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
+	if err != nil {
+		return saved
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
+		ref, hash, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		if branch := backedUpBranch(ref); branch != "" {
+			saved[rewrittenKey(branch, hash)] = true
+		}
+	}
+	return saved
+}
+
+// backedUpBranch returns the branch a backup ref was saved for, or "" for a tag,
+// which has no remote-tracking counterpart to be compared against. A backup is
+// saved as refs/ai-attributions-backup/<stamp>/heads/<branch>.
+func backedUpBranch(ref string) string {
+	saved, ok := strings.CutPrefix(ref, backupPrefix)
+	if !ok {
+		return ""
+	}
+	_, saved, ok = strings.Cut(saved, "/")
+	if !ok {
+		return ""
+	}
+	branch, ok := strings.CutPrefix(saved, "heads/")
+	if !ok {
+		return ""
+	}
+	return branch
+}
+
+func rewrittenKey(branch, hash string) string { return branch + " " + hash }

@@ -17,6 +17,7 @@ linters:
       excludes:
         - G204 # subprocess launched with variable - running git is the tool's purpose
         - G703 # path traversal - the only path removed is the one os.CreateTemp returned
+        - G705 # XSS - the writer say() holds is stdout or a buffer, never an HTTP response
     govet:
       disable:
         - fieldalignment

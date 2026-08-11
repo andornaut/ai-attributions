@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -281,5 +282,55 @@ func TestPushArgs(t *testing.T) {
 				t.Errorf("pushArgs() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A repository the run declined to examine is not a clean one. Like git diff
+// --exit-code, a finding is reported by the status only when it was asked for.
+func TestOutcomeStatus(t *testing.T) {
+	tests := []struct {
+		found    outcome
+		exitCode bool
+		want     int
+	}{
+		{found: outcomeClean, exitCode: true, want: 0},
+		{found: outcomeFound, exitCode: true, want: 1},
+		{found: outcomeSkipped, exitCode: true, want: 3},
+		{found: outcomeFound, want: 0},
+		{found: outcomeSkipped, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/exit-code=%v", tt.found, tt.exitCode), func(t *testing.T) {
+			if got := tt.found.status(config{exitCode: tt.exitCode}); got != tt.want {
+				t.Errorf("outcome(%s).status() = %d, want %d", tt.found, got, tt.want)
+			}
+		})
+	}
+}
+
+// "Is this repository clean" is the question, so every local branch and tag is
+// the default and --current-branch is what narrows it.
+func TestTargetRefsScope(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("tag", "v1.0.0")
+	git("switch", "--quiet", "--create", "agent-work")
+	git("commit", "--quiet", "--allow-empty", "--message=second")
+
+	refs, err := targetRefs(repo, config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"refs/heads/agent-work", "refs/heads/main", "refs/tags/v1.0.0"}
+	if !slices.Equal(refs, want) {
+		t.Errorf("targetRefs() = %v, want %v", refs, want)
+	}
+
+	refs, err = targetRefs(repo, config{currentBranch: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(refs, []string{"refs/heads/agent-work"}) {
+		t.Errorf("targetRefs(--current-branch) = %v, want the checked out branch alone", refs)
 	}
 }

@@ -21,7 +21,7 @@ inputs:
       action.yml was cut with, so a workflow on @v1 moves binary and action
       together. dev is the build re-cut on every push to main.
     required: false
-    default: v1.0.4
+    default: v1.1.0
   path:
     description: The repository to scan, relative to the workspace.
     required: false
@@ -173,7 +173,10 @@ runs:
 
         cd "$AI_ATTRIBUTIONS_REPO" || exit 1
         # --verbose names each commit, which is what whoever fixes them needs.
-        set -- scan --exit-code --verbose
+        # --current-branch keeps the step answering for the branch being built,
+        # so a workflow fails on what this push added rather than on a tag or an
+        # old branch the checkout happens to carry.
+        set -- scan --exit-code --verbose --current-branch
         if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
           set -- "$@" --base "$AI_ATTRIBUTIONS_BASE"
         fi
@@ -194,18 +197,25 @@ runs:
         if [ "$status" -eq 0 ]; then
           exit 0
         fi
+        # 3 is a repository the scan declined to examine, a fork for instance.
+        # Nothing was found because nothing was looked at, which is a notice
+        # rather than a pass and rather than a failure.
+        if [ "$status" -eq 3 ]; then
+          echo "::notice title=AI attributions not scanned::ai-attributions examined nothing here; the job log says why"
+          exit 0
+        fi
         if [ "$status" -ne 1 ]; then
           echo "::error::ai-attributions could not complete the scan (exit $status)"
           exit "$status"
         fi
 
         if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
-          fix="ai-attributions apply --base $AI_ATTRIBUTIONS_BASE"
+          fix="ai-attributions apply --current-branch --base $AI_ATTRIBUTIONS_BASE"
           rebase="git rebase --interactive $AI_ATTRIBUTIONS_BASE"
           scope="Only the commits this branch adds over $AI_ATTRIBUTIONS_BASE are rewritten, so
         nothing that is already on $AI_ATTRIBUTIONS_BASE moves."
         else
-          fix="ai-attributions apply"
+          fix="ai-attributions apply --current-branch"
           rebase="git rebase --interactive --root"
           scope="The whole history of this branch is in scope, so every commit from the earliest
         change onward gets a new hash."
