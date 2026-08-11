@@ -192,6 +192,24 @@ func TestCarriedTags(t *testing.T) {
 	}
 }
 
+// A rewrite with a base is pointed at the range each ref adds rather than at
+// the ref. git-filter-repo re-exports everything it is given, and a re-exported
+// commit loses its signature, so a signed commit the base already carries would
+// come out with a new hash and leave the branch sharing no ancestry with it.
+func TestRefSpecs(t *testing.T) {
+	targets := []target{{ref: "refs/heads/agent-work"}, {ref: "refs/tags/v1"}}
+
+	want := []string{"refs/heads/agent-work", "refs/tags/v1"}
+	if got := refSpecs(config{}, targets); !slices.Equal(got, want) {
+		t.Errorf("refSpecs() = %v, want %v", got, want)
+	}
+
+	want = []string{"origin/main..refs/heads/agent-work", "origin/main..refs/tags/v1"}
+	if got := refSpecs(config{base: "origin/main"}, targets); !slices.Equal(got, want) {
+		t.Errorf("refSpecs() = %v, want %v", got, want)
+	}
+}
+
 // The push covers what the rewrite moved and the run owns. Forcing a ref that
 // did not move would put a value this run never produced on the remote.
 func TestPublishable(t *testing.T) {

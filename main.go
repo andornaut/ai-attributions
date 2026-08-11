@@ -546,7 +546,7 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	if err != nil {
 		return err
 	}
-	if err := rewrite.Run(repo, refNames(targets), changes); err != nil {
+	if err := rewrite.Run(repo, refSpecs(cfg, targets), changes); err != nil {
 		return err
 	}
 	resolveRewritten(repo, targets)
@@ -568,12 +568,21 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	return nil
 }
 
-func refNames(targets []target) []string {
-	refs := make([]string, 0, len(targets))
+// refSpecs names the history git-filter-repo is pointed at. A run with a base
+// hands it the range each ref adds, rather than the ref: filter-repo re-exports
+// everything it is given through git fast-export, which does not carry the
+// gpgsig header, so a signed commit the base already carries would get a new
+// hash and leave the branch sharing no ancestry with the base.
+func refSpecs(cfg config, targets []target) []string {
+	specs := make([]string, 0, len(targets))
 	for _, t := range targets {
-		refs = append(refs, t.ref)
+		if cfg.base == "" {
+			specs = append(specs, t.ref)
+			continue
+		}
+		specs = append(specs, cfg.base+".."+t.ref)
 	}
-	return refs
+	return specs
 }
 
 func checkRewritable(repo *gitexec.Repo, cfg config) error {

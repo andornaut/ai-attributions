@@ -47,7 +47,9 @@ func CheckAvailable() error {
 
 // Run rewrites the given refs so that each commit named in changes carries its
 // replacement content. Every other commit keeps what it has, though rewriting
-// an ancestor still changes the hashes of its descendants.
+// an ancestor still changes the hashes of its descendants. A ref may be given
+// as a revision range, which limits the rewrite to the commits in it and leaves
+// the commits below untouched.
 func Run(repo *gitexec.Repo, refs []string, changes map[string]Change) error {
 	mapFile, err := writeMapFile(changes)
 	if err != nil {
