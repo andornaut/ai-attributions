@@ -44,7 +44,7 @@ go install github.com/andornaut/ai-attributions@latest
 Or unpack a release archive, which needs no Go. Any release tag goes in the URL; `dev` is the rolling one, re-cut on every push to `main`.
 
 ```bash
-curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.3/ai-attributions_linux_x86_64.tar.gz \
+curl -fsSL https://github.com/andornaut/ai-attributions/releases/download/v1.0.4/ai-attributions_linux_x86_64.tar.gz \
     | tar -xzf - -C ~/.local/bin ai-attributions
 ```
 
@@ -154,14 +154,14 @@ Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of 
 ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
 ```
 
-`--base ref` narrows those refs to the commits they add over `ref`, which is what a branch answers for: the history it was cut from is left out of the walk, out of the counts and out of `--exit-code`. The report names the base beside the refs, so a count cannot be read as covering more history than was inspected.
+`--base ref` narrows those refs to the commits they add over `ref`, which is what a branch answers for. The history it was cut from is left out of the walk, the counts and `--exit-code`, and the report names the base beside the refs.
 
 ```bash
 ai-attributions --base origin/main ~/src/example        # the commits this branch adds
 ai-attributions apply --base origin/main ~/src/example  # rewrite those and nothing earlier
 ```
 
-A commit the base already carries is left as it is, message and identity both, so a rewrite of a branch does not move the history it shares with anyone else.
+A commit the base already carries keeps its message, its identity and its hash, so rewriting a branch does not move the history it shares with anyone else.
 
 A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. Its commits are in the rewrite either way, so carrying the tag repoints it without widening what is rewritten. The scan lists the tags this covers, and a tag `--exclude` matched is repointed locally and left out of the push: exclusion decides what is scanned and published, not whether a local ref is left behind.
 
@@ -217,22 +217,22 @@ jobs:
 
 Input | Default | What it is
 --- | --- | ---
-`base` | the pull request's base branch, else the commit the push started from, else the default branch | the ref the branch is measured against
+`base` | the pull request's base branch, the commit a push started from, or the default branch | the ref the branch is measured against
 `version` | the release the action was cut with | the release to install
 `path` | `.` | the repository to scan, relative to the workspace
-`identity` | whoever pushed, at their GitHub address | what the report names as the identity an agent-authored commit would move to
+`identity` | whoever pushed, at their GitHub address | the identity the report names for an agent-authored commit
 
-A runner has no git identity configured, and a scan that cannot name one says so on every run. Nothing is rewritten in CI, so `identity` only decides what the report says. `identity: none` is not the way to quiet it: that turns identity reporting off, and a commit an agent authored with no trailer on it then passes.
+A base the action guessed and cannot resolve widens to the whole history with a warning; one passed as `base` fails the step, since widening would scan history that predates whatever it was pointing at. A push to the default branch has no base to measure against, its own previous tip not being in the checkout, so it reads the whole history too.
 
-`v1` follows the newest `v1.x.y`, and CI re-points it as part of publishing one. Pinning it rather than `main` is what decides when a change in what counts as an attribution reaches a workflow, which is the change that turns a passing repository into a failing one without a flag moving. `@v1.0.0` pins that exactly, and a commit sha pins the action's own code too.
+A runner has no git identity, and a scan that cannot name one says so on every run. Nothing is rewritten in CI, so `identity` only decides what the report says. `identity: none` is not the way to quiet it: that turns identity reporting off, and an agent-authored commit with no trailer on it then passes.
 
-The `version` input is the release whose binary gets installed, and its default is the release `action.yml` itself was cut with, so a workflow on `@v1` moves both halves together. `version: dev` installs the build re-cut on every push to `main`.
+`v1` follows the newest `v1.x.y`, re-pointed by the job that publishes one. Pinning it rather than `main` decides when a change in what counts as an attribution reaches a workflow, which is the change that turns a passing repository into a failing one without a flag moving. `@v1.0.0` pins one release, and a commit sha pins the action's code exactly. `version` names the binary, and defaults to the release its `action.yml` was cut with, so `@v1` moves both halves together; `version: dev` installs the build re-cut on every push to `main`.
 
-The action downloads the linux archive, checks it against `checksums.txt` and puts it on `PATH`, so the runner needs no Go and no `git-filter-repo`. It runs on `ubuntu-latest` and on arm64 runners; other platforms have no archive to install and fail with that.
+The action downloads the linux archive, checks it against `checksums.txt` and puts it on `PATH`, so the runner needs no Go and no `git-filter-repo`. Other platforms have no archive and fail saying so.
 
 `fetch-depth: 0` is worth setting but not required: a shallow walk would report fewer commits than the branch adds rather than fail, so the action deepens a shallow checkout itself, at the cost of a second fetch.
 
-A pull request is checked out at a merge commit with `HEAD` detached, which is no branch to scan and not the history under review either. The action scans the branch the pull request asks to merge, at `pull_request.head.sha`, and names it in the failure.
+A pull request is checked out at a merge commit with `HEAD` detached, which is neither a branch to scan nor the history under review. The action scans the branch the pull request asks to merge, at `pull_request.head.sha`, and names it in the failure.
 
 ### Backups
 
@@ -252,7 +252,7 @@ restored. A published rewrite still needs a force push to undo on the remote
 
 The push covers the refs the rewrite moved, and only those: a ref whose commits carried no change keeps its hash, and forcing it would put a value this run never produced on the remote.
 
-Every ref is pushed with `--force-with-lease`, so a remote holding anything other than what the rewrite started from rejects the push. A branch leases against its remote-tracking ref. A tag has no such counterpart, so `git ls-remote` reads the remote once to see whether it carries the tag at all, and one that it carries is leased against the pre-rewrite commit through `--force-with-lease=<ref>:<value>`, which takes the expected value explicitly. A tag the remote does not carry is created by the push, with nothing to overwrite; those refs are named in the output.
+Every ref is pushed with `--force-with-lease`, so a remote holding anything other than what the rewrite started from rejects the push. A branch leases against its remote-tracking ref. A tag has none, so `git ls-remote` reads the remote once and a tag it carries is leased against the pre-rewrite commit, `--force-with-lease=<ref>:<value>` taking that value explicitly. A tag the remote does not carry is created by the push, and is named in the output.
 
 The push is `--atomic`, so a ref whose lease fails takes the rest down with it: half a published rewrite is a branch on new history beside a tag still naming the old.
 
@@ -266,7 +266,7 @@ A carried tag is published with the rewrite rather than held back, since a tag l
 - Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported.
 - A fork is skipped without inspection, so an attribution on a commit of your own in a fork is left alone.
 - A commit message that is not valid UTF-8 is reported and left as it is, because the rewrite carries messages through JSON. The identities on that commit are still rewritten.
-- GPG signatures are dropped across the rewritten range: `git-filter-repo` works through `git fast-export`, which does not carry the `gpgsig` header.
+- GPG signatures are dropped from every commit the rewrite re-exports, `git-filter-repo` working through `git fast-export`, which does not carry the `gpgsig` header. `--base` bounds that to the range.
 
 ## Developing
 

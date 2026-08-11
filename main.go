@@ -97,8 +97,7 @@ type target struct {
 // this run did not produce over whatever the remote holds.
 func (t target) moved() bool { return t.after != "" && t.after != t.hash }
 
-// unleased reports whether there is no value to hold the remote to when pushing
-// this ref.
+// unleased reports whether there is no value to hold the remote to.
 func (t target) unleased() bool { return t.lease == "" }
 
 // identity is the name and address to put on a commit an agent authored. Both
@@ -124,9 +123,8 @@ func (p *refPatterns) Set(v string) error { *p = append(*p, v); return nil }
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		// A --exit-code finding is reported by the status alone, as git diff
-		// --exit-code does. Every other failure exits 2, which is the status
-		// the flag package already uses for a bad flag, so that a caller can
-		// tell a run that found something from one that could not look.
+		// --exit-code does. Every other failure exits 2, the status the flag
+		// package already uses, so a caller can tell a finding from a failure.
 		if errors.Is(err, errFound) {
 			os.Exit(1)
 		}
@@ -262,9 +260,6 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		return err
 	}
 	if len(commits) == 0 {
-		// The two ways to reach this say different things: a repository with
-		// nothing to walk, and a branch level with the base it was measured
-		// against.
 		if cfg.base == "" {
 			fmt.Println("no commits to inspect")
 		} else {
@@ -288,9 +283,8 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		return err
 	}
 	reportCarried(carried)
-	// A run given a base answers for what its refs add over that base. A remote
-	// branch sits outside that range rather than beside it, so it is not
-	// measured against it.
+	// A remote branch sits outside a range rather than beside it, so a run
+	// given a base does not measure one against it.
 	if cfg.base == "" {
 		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 			return err
@@ -490,12 +484,11 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 }
 
 // commitsInScope returns the commits to inspect: everything the refs in scope
-// reach, or only what they add over --base. A branch is measured against the
-// branch it was cut from so that a run answers for the commits it introduced,
-// which are the ones whoever wrote them can still rewrite.
+// reach, or only what they add over --base, which are the commits whoever
+// wrote them can still rewrite.
 func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Commit, error) {
-	// A repository with no branch to walk. git log with no ref would read HEAD,
-	// which is the one thing there is not.
+	// git log with no ref reads HEAD, which is the one thing a repository with
+	// no branch does not have.
 	if len(refs) == 0 {
 		return nil, nil
 	}
@@ -508,9 +501,8 @@ func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Co
 	return repo.CommitsNotIn([]string{cfg.base}, refs)
 }
 
-// scopeLabel names the refs a report answers for, along with the base they were
-// measured against, so that a count cannot be read as covering more history
-// than was walked.
+// scopeLabel names the refs a report answers for and the base they were
+// measured against, so a count cannot be read as covering more than was walked.
 func scopeLabel(cfg config, refs []string) string {
 	scope := strings.Join(refs, ", ")
 	if cfg.base == "" {
@@ -570,8 +562,7 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 		return nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
-	// really cannot hold the remote to. The read needs the network, which only
-	// the push itself is going to use.
+	// really cannot hold the remote to. Only a push uses the network.
 	if cfg.push {
 		if err := leaseRemote(repo, cfg.remote, publish); err != nil {
 			return err
@@ -588,11 +579,11 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	return nil
 }
 
-// refSpecs names the history git-filter-repo is pointed at. A run with a base
-// hands it the range each ref adds, rather than the ref: filter-repo re-exports
-// everything it is given through git fast-export, which does not carry the
-// gpgsig header, so a signed commit the base already carries would get a new
-// hash and leave the branch sharing no ancestry with the base.
+// refSpecs names the history git-filter-repo is pointed at. filter-repo
+// re-exports everything it is given through git fast-export, which drops the
+// gpgsig header, so handing it a ref rather than the range would give a signed
+// commit below the base a new hash and fork the branch from what it was
+// measured against.
 func refSpecs(cfg config, targets []target) []string {
 	specs := make([]string, 0, len(targets))
 	for _, t := range targets {
@@ -601,10 +592,9 @@ func refSpecs(cfg config, targets []target) []string {
 	return specs
 }
 
-// rangeSpec names one ref's history, bounded by the base when there is one.
-// Both the rewrite and the report that counts what it moves ask this question,
-// and a range answered one way in one place and another way in the other would
-// have them disagree about what the run covers.
+// rangeSpec names one ref's history, bounded by the base when there is one. The
+// rewrite and the count of what it moves ask this question, and answering it
+// twice would let them disagree about what the run covers.
 func rangeSpec(cfg config, ref string) string {
 	if cfg.base == "" {
 		return ref
@@ -728,11 +718,10 @@ func unleasedRefs(targets []target) []string {
 	return unleased
 }
 
-// leaseRemote fills in a lease for every ref that has no remote-tracking
-// counterpart to read one from, a tag for instance, by reading what the remote
-// holds. --force-with-lease takes that value explicitly, so the push itself
-// refuses a ref standing somewhere this run never saw, rather than a check
-// beforehand that a ref could move behind.
+// leaseRemote fills in a lease for every ref with no remote-tracking
+// counterpart to read one from, a tag for instance. --force-with-lease takes an
+// expected value explicitly, so the push itself refuses a ref standing
+// somewhere this run never saw, rather than a check it could move behind.
 func leaseRemote(repo *gitexec.Repo, remote string, targets []target) error {
 	refs := unleasedRefs(targets)
 	if len(refs) == 0 {
@@ -747,10 +736,9 @@ func leaseRemote(repo *gitexec.Repo, remote string, targets []target) error {
 		if !t.unleased() {
 			continue
 		}
-		// Leased against the value the rewrite started from, not the value just
-		// read: the remote holding something else is the case to refuse, and a
-		// lease naming what is already there would agree to overwrite it. A ref
-		// the remote does not carry stays unleased, the push creating it.
+		// Leased against the value the rewrite started from, not the one just
+		// read: a lease naming what is already there agrees to overwrite it. A
+		// ref the remote does not carry stays unleased and is created.
 		if _, carried := values[t.ref]; carried {
 			targets[i].lease = t.hash
 		}
@@ -758,8 +746,8 @@ func leaseRemote(repo *gitexec.Repo, remote string, targets []target) error {
 	return nil
 }
 
-// pushArgs builds the push. A ref with a known remote value is leased against
-// it; a ref without one is forced, since there is no value to compare to.
+// pushArgs builds the push. A ref with a lease is held to it; one without is
+// forced, there being nothing on the remote to overwrite.
 func pushArgs(remote string, targets []target) []string {
 	// --atomic so that a ref whose lease fails takes the rest of the push down
 	// with it. Half a published rewrite is a branch on new history with a tag
