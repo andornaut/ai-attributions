@@ -1,0 +1,48 @@
+# This is a GoReleaser configuration for ai-attributions
+version: 2
+
+project_name: ai-attributions
+
+before:
+  hooks:
+    - go mod tidy
+
+# Linux only, which is what the release archives are installed on. The code is
+# built for unix generally, so adding darwin here is a one-line change.
+builds:
+  - id: ai-attributions
+    main: .
+    binary: ai-attributions
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s -w]
+
+# One archive, holding the one binary plus the README and the licence for
+# whoever unpacks it.
+archives:
+  - formats: [tar.gz]
+    # this name template makes the output compatible with many package managers
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - README.md
+      - LICENSE.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

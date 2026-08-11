@@ -1,1 +1,6 @@
+bin/
+dist/
+coverage.txt
+
+# `go build .` by hand writes here. make build writes to bin/.
 /ai-attributions
