@@ -53,9 +53,12 @@ Value | Verdict
 --- | ---
 `Claude <noreply@anthropic.com>` | Dropped: vendor domain
 `Cursor Agent <cursoragent@cursor.com>` | Dropped: product word and vendor domain
-`google-labs-jules[bot] <jules@users.noreply.github.com>` | Dropped: bot account
+`google-labs-jules[bot] <jules@users.noreply.github.com>` | Dropped: an ambiguous name next to a product word
 `Devin Smith <devin@example.com>` | Kept: an ambiguous name and nothing else
 `Ada <ada@openai-research.example.com>` | Kept: a vendor name inside someone else's host
+`dependabot[bot] <49699333+dependabot[bot]@…>` | Kept: a bot account that names no agent
+
+A bot account is not evidence on its own. `dependabot`, `renovate`, `github-actions` and `pre-commit-ci` are bots that no agent wrote, so an account has to name an agent as well: `claude[bot]` and `gemini-code-assist[bot]` qualify, and the four above do not.
 
 ### Footers
 
@@ -74,7 +77,9 @@ A trailer is not the only place an agent is named. A commit whose author or comm
 
 This is the half that GitHub reads. The contributor list on a repository is built from commit authorship, not from trailers, so stripping trailers alone leaves the agent listed as a contributor.
 
-The same test decides an identity as decides a trailer, so a committer named Devin Smith is left alone for the same reason a co-author is.
+The same test decides an identity as decides a trailer, so a committer named Devin Smith is left alone for the same reason a co-author is, and a Dependabot commit keeps its author.
+
+Re-attribution is the one part that needs an identity to move a commit to. Scanning and `-check` report agent identities without one, so a CI job that never configures git still works.
 
 ### Emdashes
 
@@ -175,7 +180,7 @@ not pushed. To publish the rewrite:
 
 ### Excluding refs
 
-`-exclude` takes a glob, is repeatable, and matches either the full ref or its short name. A tag a release workflow owns should not be rewritten by hand:
+`-exclude` takes a glob, is repeatable, and matches the full ref or its short name. For a remote-tracking ref the branch name alone works too, so `-exclude agent-work` covers `refs/remotes/origin/agent-work`. A tag a release workflow owns should not be rewritten by hand:
 
 ```bash
 ai-attributions -all -exclude dev -exclude 'release/*' -apply ~/src/example
@@ -188,6 +193,8 @@ Rewriting published history is the expensive fix. `-check` reports and exits non
 ```bash
 ai-attributions -check || exit 1
 ```
+
+It needs no git identity configured, and it accounts for the remote branches it names as well as the refs in scope, so it cannot pass a run whose own output reports attributions.
 
 ### Remote branches
 

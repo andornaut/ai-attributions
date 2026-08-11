@@ -176,21 +176,27 @@ func Identity(name, address string) bool {
 	return namesAgent(name + " <" + address + ">")
 }
 
-// namesAgent reports whether a trailer value identifies an AI agent rather than
-// a person. The display name and the address are weighed separately so that a
-// vendor name appearing in an unrelated hostname is not taken as evidence.
+// namesAgent reports whether an identity is an AI agent rather than a person.
+// The display name and the address are weighed separately so that a vendor name
+// appearing in an unrelated hostname is not taken as evidence.
+//
+// A bot account is not evidence on its own. dependabot, renovate and
+// github-actions are bots that no agent wrote, and re-attributing their commits
+// would misstate who wrote them, so an account has to name an agent as well.
 func namesAgent(value string) bool {
 	name, address := splitIdentity(value)
-	if botIdentity.MatchString(value) {
+	local, host, _ := strings.Cut(address, "@")
+
+	if vendorDomain.MatchString(host) {
 		return true
 	}
-	if _, host, found := strings.Cut(address, "@"); found && vendorDomain.MatchString(host) {
+	if unambiguousAgent.MatchString(name) || unambiguousAgent.MatchString(local) {
 		return true
 	}
-	if unambiguousAgent.MatchString(name) {
-		return true
+	if ambiguousAgent.MatchString(name) || ambiguousAgent.MatchString(local) {
+		return productContext.MatchString(value) || botIdentity.MatchString(value)
 	}
-	return ambiguousAgent.MatchString(name) && productContext.MatchString(name)
+	return false
 }
 
 // mentionsAgent reports whether free-form text names an AI agent. It is looser

@@ -61,13 +61,20 @@ type target struct {
 	lease string
 }
 
-// identity is the name and address to put on a commit an agent authored.
+// identity is the name and address to put on a commit an agent authored. Both
+// parts are set together or not at all, so that a rewrite can never assign half
+// of one.
 type identity struct {
 	name    string
 	address string
+	enabled bool
 }
 
 func (i identity) String() string { return i.name + " <" + i.address + ">" }
+
+// resolved reports whether there is an identity to re-attribute to. Scanning
+// works without one; only a rewrite needs it.
+func (i identity) resolved() bool { return i.name != "" && i.address != "" }
 
 // refPatterns collects the repeatable -exclude flag.
 type refPatterns []string
@@ -130,15 +137,18 @@ func run(argv []string) error {
 	if err := found.reportRadius(repo, refs); err != nil {
 		return err
 	}
-	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+	remote, err := reportRemoteOnly(repo, cfg, opts, who, refs)
+	if err != nil {
 		return err
 	}
 
-	if len(found.changes) == 0 {
+	if found.flagged+remote == 0 {
 		return nil
 	}
 	if !cfg.apply {
-		fmt.Println("\nnothing was rewritten. Pass -apply to rewrite the history")
+		if len(found.changes) > 0 {
+			fmt.Println("\nnothing was rewritten. Pass -apply to rewrite the history")
+		}
 		if cfg.check {
 			return errFound
 		}
@@ -198,22 +208,31 @@ func version() string {
 	return "devel"
 }
 
-// targetIdentity resolves who agent-authored commits are re-attributed to.
+// targetIdentity resolves who agent-authored commits are re-attributed to. A
+// bad -identity is always an error, but an unset git identity is only one when
+// there is a rewrite to do: scanning and -check report agent identities without
+// needing somewhere to move them to.
 func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
 	if cfg.noIdentity {
 		return identity{}, nil
 	}
+
 	if cfg.identity != "" {
-		name, address, found := strings.Cut(strings.TrimSuffix(cfg.identity, ">"), "<")
-		if !found {
-			return identity{}, fmt.Errorf("-identity should look like \"Name <email>\", got %q", cfg.identity)
+		name, address, found := strings.Cut(strings.TrimSuffix(strings.TrimSpace(cfg.identity), ">"), "<")
+		who := identity{name: strings.TrimSpace(name), address: strings.TrimSpace(address), enabled: true}
+		if !found || !who.resolved() {
+			return identity{}, fmt.Errorf("-identity should look like \"Name <email>\" with both parts set, got %q", cfg.identity)
 		}
-		return identity{name: strings.TrimSpace(name), address: strings.TrimSpace(address)}, nil
+		return who, nil
 	}
 
-	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email")}
-	if who.name == "" || who.address == "" {
-		return identity{}, fmt.Errorf("the repository has no user.name and user.email to re-attribute to; pass -identity or -no-identity")
+	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email"), enabled: true}
+	if !who.resolved() {
+		if cfg.apply {
+			return identity{}, fmt.Errorf("the repository has no user.name and user.email to re-attribute to; pass -identity or -no-identity")
+		}
+		fmt.Println("note: no user.name and user.email are set, so agent identities are reported but cannot be rewritten")
+		return identity{enabled: true}, nil
 	}
 	return who, nil
 }
@@ -254,15 +273,26 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 	return kept, nil
 }
 
-// matches reports whether a ref is excluded, testing each pattern against both
-// the full ref and its short name, so that -exclude dev covers refs/tags/dev.
+// matches reports whether a ref is excluded, testing each pattern against the
+// full ref and its short forms, so that -exclude dev covers refs/tags/dev and
+// -exclude agent-work covers refs/remotes/origin/agent-work.
 func (p refPatterns) matches(ref string) (bool, error) {
-	short := ref
+	candidates := []string{ref}
 	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
-		short = strings.TrimPrefix(short, prefix)
+		if short, ok := strings.CutPrefix(ref, prefix); ok {
+			candidates = append(candidates, short)
+			// A remote-tracking ref is still qualified by its remote, so the
+			// branch name on its own is offered too.
+			if prefix == "refs/remotes/" {
+				if _, branch, found := strings.Cut(short, "/"); found {
+					candidates = append(candidates, branch)
+				}
+			}
+		}
 	}
+
 	for _, pattern := range p {
-		for _, candidate := range []string{ref, short} {
+		for _, candidate := range candidates {
 			matched, err := path.Match(pattern, candidate)
 			if err != nil {
 				return false, fmt.Errorf("bad -exclude pattern %q: %w", pattern, err)
@@ -414,7 +444,7 @@ func listBackups(repo *gitexec.Repo) error {
 		fmt.Println("no backups saved")
 		return nil
 	}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		ref, hash, _ := strings.Cut(line, " ")
 		saved := strings.TrimPrefix(ref, backupPrefix)
 		stamp, original, _ := strings.Cut(saved, "/")
@@ -426,20 +456,39 @@ func listBackups(repo *gitexec.Repo) error {
 
 // restoreBackup points each saved ref back at the commit it held.
 func restoreBackup(repo *gitexec.Repo, stamp string) error {
-	out, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix+stamp)
+	// Ref completion offers a trailing slash. Left on, it would build a prefix
+	// that matches nothing, and every ref would be restored to a name derived
+	// from an untrimmed path while the real branch stayed where it was.
+	stamp = strings.Trim(stamp, "/")
+	if stamp == "" {
+		return fmt.Errorf("-restore needs a backup timestamp; ai-attributions -list-backups shows them")
+	}
+
+	prefix := backupPrefix + stamp + "/"
+	out, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", prefix)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(out) == "" {
 		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+
+	restored := 0
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		ref, hash, _ := strings.Cut(line, " ")
-		original := "refs/" + strings.TrimPrefix(ref, backupPrefix+stamp+"/")
+		saved, ok := strings.CutPrefix(ref, prefix)
+		if !ok {
+			return fmt.Errorf("%s is not under %s, so the ref to restore cannot be worked out", ref, prefix)
+		}
+		original := "refs/" + saved
 		if err := repo.UpdateRef(hash, original); err != nil {
 			return err
 		}
 		fmt.Printf("%s -> %s\n", original, shorten(hash))
+		restored++
+	}
+	if restored == 0 {
+		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
 	fmt.Println("\nrestored. A published rewrite still needs a force push to undo on the remote")
 	return nil

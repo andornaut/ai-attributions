@@ -19,6 +19,10 @@ type findings struct {
 	emdashes   int
 	commits    int
 	skipped    int
+	// flagged counts commits carrying an attribution, which is not the same as
+	// len(changes): an agent identity with nowhere to move to is reported and
+	// counted, but produces no change.
+	flagged int
 }
 
 // detail is one commit's findings, kept for -verbose.
@@ -41,6 +45,7 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 	for _, commit := range commits {
 		var change rewrite.Change
 		item := detail{commit: commit}
+		flagged := false
 
 		// The rewrite carries messages as JSON, which cannot hold bytes that
 		// are not valid UTF-8 without replacing them. Such a message is left
@@ -48,6 +53,7 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 		if utf8.ValidString(commit.Message) {
 			if got := clean.Inspect(opts, commit.Message); !got.Empty() {
 				change.Message = clean.Message(opts, commit.Message)
+				flagged = true
 				item.removedLines = got.RemovedLines
 				item.changedLines = got.ChangedLines
 				found.emdashes += len(got.ChangedLines)
@@ -59,16 +65,22 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			found.skipped++
 		}
 
-		if who.name != "" {
+		if who.enabled {
 			if clean.Identity(commit.AuthorName, commit.AuthorEmail) {
-				change.AuthorName, change.AuthorEmail = who.name, who.address
+				flagged = true
 				item.identities = append(item.identities,
 					mapping("author", commit.AuthorName, commit.AuthorEmail, who))
+				if who.resolved() {
+					change.AuthorName, change.AuthorEmail = who.name, who.address
+				}
 			}
 			if clean.Identity(commit.CommitterName, commit.CommitterEmail) {
-				change.CommitterName, change.CommitterEmail = who.name, who.address
+				flagged = true
 				item.identities = append(item.identities,
 					mapping("committer", commit.CommitterName, commit.CommitterEmail, who))
+				if who.resolved() {
+					change.CommitterName, change.CommitterEmail = who.name, who.address
+				}
 			}
 			for _, label := range item.identities {
 				found.identities[label]++
@@ -77,6 +89,9 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 
 		if change != (rewrite.Change{}) {
 			found.changes[commit.Hash] = change
+		}
+		if flagged {
+			found.flagged++
 			found.details = append(found.details, item)
 		}
 	}
@@ -84,13 +99,16 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 }
 
 func mapping(field, name, address string, who identity) string {
+	if !who.resolved() {
+		return fmt.Sprintf("%s %s <%s> (no identity to move it to)", field, name, address)
+	}
 	return fmt.Sprintf("%s %s <%s> -> %s", field, name, address, who)
 }
 
 // report prints the tallies, and every commit behind them under -verbose.
 func (f findings) report(verbose bool, refs []string) {
 	scope := strings.Join(refs, ", ")
-	if len(f.changes) == 0 {
+	if f.flagged == 0 {
 		fmt.Printf("no AI attributions in %d commits, across %s\n", f.commits, scope)
 		f.reportSkipped()
 		return
@@ -112,7 +130,7 @@ func (f findings) report(verbose bool, refs []string) {
 		fmt.Println()
 	}
 
-	fmt.Printf("%d of %d commits carry AI attributions, across %s\n", len(f.changes), f.commits, scope)
+	fmt.Printf("%d of %d commits carry AI attributions, across %s\n", f.flagged, f.commits, scope)
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
@@ -193,31 +211,45 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 // so the tool reports them rather than rewriting refs it has not been pointed
 // at. It reads remote-tracking refs rather than the remote itself, so that a
 // scan needs no network.
-func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) error {
+// It returns how many commits it flagged, so that -check accounts for what the
+// report names rather than passing a repository whose own output says otherwise.
+func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) (int, error) {
 	if !repo.HasRemote(cfg.remote) {
-		return nil
+		return 0, nil
 	}
 	remoteRefs, err := repo.RemoteRefs(cfg.remote)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var lines []string
+	total := 0
 	for _, ref := range remoteRefs {
-		if excluded, err := cfg.exclude.matches(ref); err != nil || excluded {
+		excluded, err := cfg.exclude.matches(ref)
+		if err != nil {
+			return 0, err
+		}
+		if excluded {
 			continue
 		}
+		// A ref that cannot be walked is called out rather than skipped, so
+		// that an unreadable branch does not read as a clean one.
 		commits, err := repo.CommitsNotIn(localRefs, ref)
-		if err != nil || len(commits) == 0 {
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))
 			continue
 		}
-		if found := inspect(opts, who, commits); len(found.changes) > 0 {
+		if len(commits) == 0 {
+			continue
+		}
+		if found := inspect(opts, who, commits); found.flagged > 0 {
+			total += found.flagged
 			lines = append(lines, fmt.Sprintf("%6d of %d commits  %s",
-				len(found.changes), len(commits), ref))
+				found.flagged, len(commits), ref))
 		}
 	}
 	if len(lines) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	fmt.Printf("\nremote branches carrying attributions that are not in scope\n")
@@ -226,5 +258,5 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 	}
 	fmt.Printf("check one out to rewrite it: git switch -c <name> %s/<name>\n", cfg.remote)
 	fmt.Printf("these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that\n")
-	return nil
+	return total, nil
 }
