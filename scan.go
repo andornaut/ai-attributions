@@ -249,23 +249,22 @@ func (f findings) reportRadius(repo *gitexec.Repo, refs []string) error {
 // so the tool reports them rather than rewriting refs it has not been pointed
 // at. It reads remote-tracking refs rather than the remote itself, so that a
 // scan needs no network.
-// It returns how many commits it flagged, so that -check accounts for what the
-// report names rather than passing a repository whose own output says otherwise.
-func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) (int, error) {
+// Nothing it finds counts toward the run's own findings or its exit code, which
+// answer for the refs in scope, the same set apply rewrites.
+func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) error {
 	if !repo.HasRemote(cfg.remote) {
-		return 0, nil
+		return nil
 	}
 	remoteRefs, err := repo.RemoteRefs(cfg.remote)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	var lines []string
-	total := 0
 	for _, ref := range remoteRefs {
 		excluded, err := cfg.exclude.matches(ref)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		if excluded {
 			continue
@@ -281,20 +280,19 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 			continue
 		}
 		if found := inspect(opts, who, commits); found.flagged > 0 {
-			total += found.flagged
 			lines = append(lines, fmt.Sprintf("%6d of %d commits  %s",
 				found.flagged, len(commits), ref))
 		}
 	}
 	if len(lines) == 0 {
-		return 0, nil
+		return nil
 	}
 
-	fmt.Printf("\nremote branches carrying attributions that are not in scope\n")
+	fmt.Printf("\nnot in scope, and not counted above: remote branches carrying attributions\n")
 	for _, line := range lines {
 		fmt.Println(line)
 	}
-	fmt.Printf("check one out to rewrite it: git switch -c <name> %s/<name>\n", cfg.remote)
+	fmt.Printf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
 	fmt.Printf("these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that\n")
-	return total, nil
+	return nil
 }

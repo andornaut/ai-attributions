@@ -240,12 +240,14 @@ func scan(repo *gitexec.Repo, cfg config) error {
 	if err := found.reportRadius(repo, refs); err != nil {
 		return err
 	}
-	remote, err := reportRemoteOnly(repo, cfg, opts, who, refs)
-	if err != nil {
+	// Reported after the findings and counted in none of them. apply rewrites
+	// the refs in scope, so scan answers for the same set: what is outside it
+	// is a pointer to another run, not a result of this one.
+	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 		return err
 	}
 
-	if found.flagged+remote == 0 {
+	if found.flagged == 0 {
 		return nil
 	}
 	if !cfg.applying() {

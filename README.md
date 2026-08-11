@@ -22,11 +22,11 @@ rewriting for a typographic fix would move commits that nothing else moves
 
 pass --verbose to list the commits behind these counts
 
-refs/heads/main: 4 of 5 commits will change hash, starting at 6da5c96636ed 2026-08-11 feat(parser): accept empty payloads
+refs/heads/main: 4 of 5 commits will change hash, starting at e241d699c072 2026-08-11 feat(parser): accept empty payloads
 
-remote branches carrying attributions that are not in scope
+not in scope, and not counted above: remote branches carrying attributions
      1 of 1 commits  refs/remotes/origin/agent-work
-check one out to rewrite it: git switch -c <name> origin/<name>
+check one out to bring it into scope: git switch -c <name> origin/<name>
 these are remote-tracking refs, which still list a branch deleted upstream; git fetch --prune settles that
 
 nothing was rewritten. Run apply to rewrite the history
@@ -187,11 +187,13 @@ Rewriting published history is the expensive fix. `--exit-code` reports as usual
 ai-attributions --exit-code
 ```
 
-It needs no git identity configured, and it accounts for the remote branches it names as well as the refs in scope, so it cannot pass a run whose own output reports attributions.
+It needs no git identity configured, and it answers for the refs in scope, the same set `apply` rewrites. A remote branch the report names is not counted, since no `apply` in this repository would fix it.
 
 ### Remote branches
 
-The scan reads `refs/remotes/<remote>/*` and names any branch carrying attributions that the refs in scope do not cover, which is where the branches an agent pushed and you never checked out show up. It reports them and stops there. Rewriting one means checking it out first, so the tool never force pushes a ref it was not pointed at.
+`scan` and `apply` cover the same refs. `--all` and `--exclude` move that set, and they move it for both, so what a scan reports is what an apply rewrites.
+
+Remote branches sit outside it. The scan reads `refs/remotes/<remote>/*` and names any branch carrying attributions that the refs in scope do not cover, which is where the branches an agent pushed and you never checked out show up. Those are reported below the findings and counted in none of them, including `--exit-code`: rewriting one means checking it out first, so the tool never force pushes a ref it was not pointed at, and never fails a run over something the run could not have fixed.
 
 It reads remote-tracking refs rather than the remote, so a scan needs no network. The cost is that a branch deleted upstream is still listed until `git fetch --prune` clears it, which the report says.
 
