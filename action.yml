@@ -1,0 +1,198 @@
+name: ai-attributions
+description: Fail the run when the commits a branch adds carry AI attributions.
+author: andornaut
+
+branding:
+  icon: git-commit
+  color: red
+
+inputs:
+  base:
+    description: >-
+      The ref the branch is measured against. Only the commits the branch adds
+      over it are scanned. Defaults to the pull request's base branch, to the
+      commit a push started from, or to the repository's default branch.
+    required: false
+    default: ""
+  version:
+    description: >-
+      The ai-attributions release to install. dev is re-cut on every push to
+      main; name a tag to pin one build, and bump this default with it.
+    required: false
+    default: dev
+  path:
+    description: The repository to scan, relative to the workspace.
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Install ai-attributions
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        if [ "$os" != linux ]; then
+          echo "::error::ai-attributions publishes linux archives only, and this runner is $os"
+          exit 1
+        fi
+        case "$(uname -m)" in
+          x86_64) arch=x86_64 ;;
+          aarch64 | arm64) arch=arm64 ;;
+          *) echo "::error::no ai-attributions archive for $(uname -m)"; exit 1 ;;
+        esac
+
+        dir="$RUNNER_TEMP/ai-attributions"
+        archive="ai-attributions_${os}_${arch}.tar.gz"
+        url="https://github.com/andornaut/ai-attributions/releases/download/$INPUT_VERSION"
+        mkdir -p "$dir"
+        curl -fsSL -o "$dir/$archive" "$url/$archive"
+        curl -fsSL -o "$dir/checksums.txt" "$url/checksums.txt"
+
+        # dev is a moving tag, so a download that straddles a re-cut would
+        # otherwise install a mixed set silently.
+        (cd "$dir" && sha256sum --ignore-missing --check checksums.txt)
+        tar -xzf "$dir/$archive" -C "$dir"
+        echo "$dir" >>"$GITHUB_PATH"
+
+    - name: Resolve the history to scan
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_PATH: ${{ inputs.path }}
+        PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        PR_HEAD_REF: ${{ github.head_ref }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+
+        repo="$GITHUB_WORKSPACE/$INPUT_PATH"
+        cd "$repo"
+        echo "AI_ATTRIBUTIONS_REPO=$repo" >>"$GITHUB_ENV"
+
+        # A shallow walk stops at the boundary the checkout fetched to, which
+        # would report fewer commits than the branch adds rather than fail.
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+          echo "deepening a shallow checkout; fetch-depth: 0 on actions/checkout skips this"
+          git fetch --quiet --no-tags --unshallow origin
+        fi
+
+        base="$INPUT_BASE"
+        if [ -z "$base" ] && [ -n "$PR_BASE_REF" ]; then
+          base="origin/$PR_BASE_REF"
+        fi
+        # A push is measured against where the branch stood before it, so the
+        # run answers for the commits that arrived. A new branch and a force
+        # push have no such commit, and fall through to the default branch.
+        if [ -z "$base" ] && [ "${PUSH_BEFORE:-}" != "" ] &&
+          [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] &&
+          git rev-parse --quiet --verify "$PUSH_BEFORE^{commit}" >/dev/null; then
+          base="$PUSH_BEFORE"
+        fi
+        if [ -z "$base" ] && [ -n "$DEFAULT_BRANCH" ]; then
+          base="origin/$DEFAULT_BRANCH"
+        fi
+
+        case "$base" in
+          origin/*)
+            branch="${base#origin/}"
+            git fetch --quiet --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+            ;;
+        esac
+        if [ -n "$base" ] && ! git rev-parse --quiet --verify "$base^{commit}" >/dev/null; then
+          echo "::warning::$base names no commit here, so the whole history is scanned instead"
+          base=""
+        fi
+        # A branch level with its base adds nothing, which is a pass rather than
+        # a scan of the history it inherited.
+        if [ -n "$base" ] && [ "$(git rev-parse "$base^{commit}")" = "$(git rev-parse "HEAD^{commit}")" ]; then
+          echo "::warning::HEAD is $base, so there are no added commits to scan"
+        fi
+        echo "AI_ATTRIBUTIONS_BASE=$base" >>"$GITHUB_ENV"
+
+        # The scan reads the current branch, and a pull request is checked out
+        # at a merge commit with HEAD detached. Its second parent is the branch
+        # itself, which is the history the pull request is asking to merge.
+        if ! git symbolic-ref --quiet HEAD >/dev/null; then
+          head=HEAD
+          # A checkout of the base repository, as pull_request_target does, has
+          # no commit under that sha and is scanned where it stands.
+          if [ -n "${PR_HEAD_SHA:-}" ] && git rev-parse --quiet --verify "$PR_HEAD_SHA^{commit}" >/dev/null; then
+            head="$PR_HEAD_SHA"
+          fi
+          git switch --quiet --force-create "${PR_HEAD_REF:-ai-attributions-scan}" "$head"
+        fi
+        echo "AI_ATTRIBUTIONS_BRANCH=$(git symbolic-ref --short HEAD)" >>"$GITHUB_ENV"
+
+    - name: Scan for AI attributions
+      shell: bash
+      run: |
+        set -uo pipefail
+
+        cd "$AI_ATTRIBUTIONS_REPO" || exit 1
+        # --verbose names each commit, which is what whoever fixes them needs.
+        if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
+          set -- scan --exit-code --verbose --base "$AI_ATTRIBUTIONS_BASE"
+        else
+          set -- scan --exit-code --verbose
+        fi
+
+        report="$RUNNER_TEMP/ai-attributions-report.txt"
+        ai-attributions "$@" | tee "$report"
+        status="${PIPESTATUS[0]}"
+        if [ "$status" -eq 0 ]; then
+          exit 0
+        fi
+        if [ "$status" -ne 1 ]; then
+          echo "::error::ai-attributions could not complete the scan (exit $status)"
+          exit "$status"
+        fi
+
+        if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
+          fix="ai-attributions apply --base $AI_ATTRIBUTIONS_BASE"
+          rebase="git rebase --interactive $AI_ATTRIBUTIONS_BASE"
+          scope="Only the commits this branch adds over $AI_ATTRIBUTIONS_BASE are rewritten, so
+        nothing that is already on $AI_ATTRIBUTIONS_BASE moves."
+        else
+          fix="ai-attributions apply"
+          rebase="git rebase --interactive --root"
+          scope="The whole history of this branch is in scope, so every commit from the earliest
+        change onward gets a new hash."
+        fi
+
+        # Written to the log and to the run summary, so the commands are in
+        # reach from either place.
+        guidance=$(
+          cat <<MESSAGE
+
+        The commits listed above carry AI attributions, which this repository does not
+        keep in its history. Rewrite $AI_ATTRIBUTIONS_BRANCH to remove them, then force push it.
+
+        $scope
+
+            go install github.com/andornaut/ai-attributions@latest
+            $fix
+            git push --force-with-lease
+
+        apply needs git-filter-repo on PATH. Editing the messages instead works just as
+        well: run $rebase, reword each commit named
+        above to drop the trailers and footers, and reset the author on the commits an
+        agent signed with git commit --amend --reset-author.
+        MESSAGE
+        )
+        echo "$guidance"
+        {
+          echo '## AI attributions found'
+          echo '```'
+          cat "$report"
+          echo "$guidance"
+          echo '```'
+        } >>"$GITHUB_STEP_SUMMARY"
+        echo "::error title=AI attributions in the commit history::Rewrite $AI_ATTRIBUTIONS_BRANCH to remove them and force push it; the job log lists the commits and the commands"
+        exit 1

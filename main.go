@@ -61,6 +61,7 @@ var commands = map[string]bool{
 type config struct {
 	command  string
 	all      bool
+	base     string
 	emdashes bool
 	exclude  refPatterns
 	exitCode bool
@@ -118,10 +119,15 @@ func (p *refPatterns) Set(v string) error { *p = append(*p, v); return nil }
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		if !errors.Is(err, errFound) {
-			fmt.Fprintf(os.Stderr, "ai-attributions: %v\n", err)
+		// A --exit-code finding is reported by the status alone, as git diff
+		// --exit-code does. Every other failure exits 2, which is the status
+		// the flag package already uses for a bad flag, so that a caller can
+		// tell a run that found something from one that could not look.
+		if errors.Is(err, errFound) {
+			os.Exit(1)
 		}
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "ai-attributions: %v\n", err)
+		os.Exit(2)
 	}
 }
 
@@ -192,6 +198,7 @@ func parseArgs(argv []string) (config, []string, error) {
 
 	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
 	flags.BoolVar(&cfg.all, "all", false, "every local branch and tag, not just the current branch")
+	flags.StringVar(&cfg.base, "base", "", "only the commits the refs in scope add over this `ref`")
 	flags.BoolVar(&cfg.emdashes, "emdashes", false, "also rewrite emdashes, on the commits an attribution is already moving")
 	flags.Var(&cfg.exclude, "exclude", "skip refs matching this `glob` (repeatable)")
 	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when attributions are found, as git diff does (scan only)")
@@ -211,6 +218,8 @@ func parseArgs(argv []string) (config, []string, error) {
 		return cfg, nil, fmt.Errorf("--push belongs to apply; there is nothing to push until the history is rewritten")
 	case cfg.exitCode && cfg.command != "scan":
 		return cfg, nil, fmt.Errorf("--exit-code belongs to scan, which reports without changing anything")
+	case cfg.base != "" && cfg.command != "scan" && !cfg.applying():
+		return cfg, nil, fmt.Errorf("--base belongs to scan and apply, which are the commands that walk the history")
 	}
 	return cfg, flags.Args(), nil
 }
@@ -249,16 +258,20 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		return nil
 	}
 
-	commits, err := repo.Commits(refs)
+	commits, err := commitsInScope(repo, cfg, refs)
 	if err != nil {
 		return err
+	}
+	if len(commits) == 0 {
+		fmt.Println("no commits to inspect")
+		return nil
 	}
 	// Trailers are the point of the tool. Emdashes are asked for: they move no
 	// commit by themselves, so leaving them costs nothing.
 	opts := clean.Options{Trailers: true, Emdashes: cfg.emdashes}
 
 	found := inspect(opts, who, commits)
-	found.report(cfg.verbose, refs)
+	found.report(cfg.verbose, scopeLabel(cfg, refs))
 	moved, err := found.reportRadius(repo, refs)
 	if err != nil {
 		return err
@@ -268,8 +281,13 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		return err
 	}
 	reportCarried(carried)
-	if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
-		return err
+	// A run given a base answers for what its refs add over that base. A remote
+	// branch sits outside that range rather than beside it, so it is not
+	// measured against it.
+	if cfg.base == "" {
+		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+			return err
+		}
 	}
 
 	if found.flagged == 0 {
@@ -462,6 +480,31 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 		kept = append(kept, ref)
 	}
 	return kept, nil
+}
+
+// commitsInScope returns the commits to inspect: everything the refs in scope
+// reach, or only what they add over --base. A branch is measured against the
+// branch it was cut from so that a run answers for the commits it introduced,
+// which are the ones whoever wrote them can still rewrite.
+func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Commit, error) {
+	if cfg.base == "" {
+		return repo.Commits(refs)
+	}
+	if _, err := repo.Resolve(cfg.base); err != nil {
+		return nil, fmt.Errorf("--base %q does not name a commit in this repository; fetch it first", cfg.base)
+	}
+	return repo.CommitsNotIn([]string{cfg.base}, refs)
+}
+
+// scopeLabel names the refs a report answers for, along with the base they were
+// measured against, so that a count cannot be read as covering more history
+// than was walked.
+func scopeLabel(cfg config, refs []string) string {
+	scope := strings.Join(refs, ", ")
+	if cfg.base == "" {
+		return scope
+	}
+	return scope + " since " + cfg.base
 }
 
 // matches tests each pattern against the full ref and its short forms, so

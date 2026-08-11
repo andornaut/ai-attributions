@@ -43,6 +43,78 @@ func TestExcludeMatchesRejectsABadPattern(t *testing.T) {
 	}
 }
 
+// --base measures the refs in scope against the history they were cut from, so
+// a run answers for the commits they added rather than the ones they inherited.
+func TestCommitsInScope(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("commit", "--quiet", "--allow-empty", "--message=second")
+	git("switch", "--quiet", "--create", "agent-work")
+	git("commit", "--quiet", "--allow-empty", "--message=third")
+	refs := []string{"refs/heads/agent-work"}
+
+	tests := []struct {
+		name    string
+		cfg     config
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "no base walks everything the branch reaches",
+			want: []string{"third", "second", "init"},
+		},
+		{
+			name: "a base leaves the inherited commits out",
+			cfg:  config{base: "refs/heads/main"},
+			want: []string{"third"},
+		},
+		{
+			name: "a base the branch has not moved past leaves nothing",
+			cfg:  config{base: "refs/heads/agent-work"},
+		},
+		{
+			name:    "a base that names no commit is an error, not an empty scope",
+			cfg:     config{base: "refs/heads/absent"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			commits, err := commitsInScope(repo, tt.cfg, refs)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("commitsInScope() accepted a base naming no commit, returning %d commits", len(commits))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var got []string
+			for _, c := range commits {
+				got = append(got, c.Subject())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("commitsInScope() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The scope a report names is the history it answers for, base included, so a
+// count cannot be read as covering more than was walked.
+func TestScopeLabel(t *testing.T) {
+	refs := []string{"refs/heads/agent-work"}
+	if got := scopeLabel(config{}, refs); got != "refs/heads/agent-work" {
+		t.Errorf("scopeLabel() = %q", got)
+	}
+	want := "refs/heads/agent-work since origin/main"
+	if got := scopeLabel(config{base: "origin/main"}, refs); got != want {
+		t.Errorf("scopeLabel() = %q, want %q", got, want)
+	}
+}
+
 // A tag naming a commit the rewrite moves is repointed with it, whatever refs
 // the run was pointed at, since a tag left behind would go on naming history
 // nothing else references. --exclude keeps a tag out of the push, not out of

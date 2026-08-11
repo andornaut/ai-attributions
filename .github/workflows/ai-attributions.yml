@@ -1,0 +1,31 @@
+name: AI attributions
+
+# Pull requests only. A push to main re-cuts the release this action installs,
+# so gating that push would race the build that produces what it runs.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai-attributions:
+    name: AI attributions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      # The action in this repository, installing the binary a release built.
+      # What another repository gets from andornaut/ai-attributions, checked
+      # here against a real pull request rather than only in tests.
+      - name: Scan the branch
+        uses: ./

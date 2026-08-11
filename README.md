@@ -32,7 +32,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Identities](#identities) - agent-authored commits are re-attributed, which is what GitHub's contributor list reads
 - [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then only on commits an attribution already moves
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
-- [`--exit-code`](#catching-them-before-they-land) exits 1 when attributions are found, for CI and pre-push hooks
+- [`--exit-code`](#catching-them-before-they-land) exits 1 when attributions are found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
 - [Backups](#backups) - the pre-rewrite refs are saved, and `restore` puts one run back
 
 ## Installation
@@ -76,6 +76,7 @@ commands:
 
 flags:
   --all                every local branch and tag, not just the current branch
+  --base ref           only the commits the refs in scope add over this ref
   --emdashes           also rewrite emdashes, on the commits an attribution is already moving
   --exclude glob       skip refs matching this glob (repeatable)
   --exit-code          exit 1 when attributions are found, as git diff does (scan only)
@@ -153,9 +154,18 @@ Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of 
 ai-attributions apply --all --exclude dev --exclude 'release/*' ~/src/example
 ```
 
+`--base ref` narrows those refs to the commits they add over `ref`, which is what a branch answers for: the history it was cut from is left out of the walk, out of the counts and out of `--exit-code`. The report names the base beside the refs, so a count cannot be read as covering more history than was inspected.
+
+```bash
+ai-attributions --base origin/main ~/src/example        # the commits this branch adds
+ai-attributions apply --base origin/main ~/src/example  # rewrite those and nothing earlier
+```
+
+A commit the base already carries is left as it is, message and identity both, so a rewrite of a branch does not move the history it shares with anyone else.
+
 A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. Its commits are in the rewrite either way, so carrying the tag repoints it without widening what is rewritten. The scan lists the tags this covers, and a tag `--exclude` matched is repointed locally and left out of the push: exclusion decides what is scanned and published, not whether a local ref is left behind.
 
-Remote branches sit outside that set. The scan names any that carry attributions and are not already covered, below the findings and counted in none of them, including `--exit-code`. Rewriting one means checking it out first. It reads remote-tracking refs rather than the remote, so no network is needed, and a branch deleted upstream is listed until `git fetch --prune` clears it.
+Remote branches sit outside that set. The scan names any that carry attributions and are not already covered, below the findings and counted in none of them, including `--exit-code`. Rewriting one means checking it out first. It reads remote-tracking refs rather than the remote, so no network is needed, and a branch deleted upstream is listed until `git fetch --prune` clears it. A run given `--base` leaves that report out, since a remote branch sits outside the range rather than beside it.
 
 ### Forks
 
@@ -173,11 +183,51 @@ Nothing is reported and the exit status is 0, including under `--exit-code`. `ba
 
 ### Catching them before they land
 
-`--exit-code` reports as usual and exits 1 when anything is found, the way `git diff --exit-code` does. It needs no git identity configured, and it answers for the refs in scope, the same set `apply` rewrites.
+`--exit-code` reports as usual and exits 1 when anything is found, the way `git diff --exit-code` does. It needs no git identity configured, and it answers for the refs in scope, the same set `apply` rewrites. Any other failure exits 2, so a caller can tell a run that found something from one that could not look.
 
 ```bash
-ai-attributions --exit-code
+ai-attributions --exit-code                    # the whole history of this branch
+ai-attributions --exit-code --base origin/main # only the commits this branch adds
 ```
+
+### GitHub Action
+
+[`action.yml`](./action.yml) is a composite action that runs the scan over the commits a branch adds and fails the job when it finds any. It is meant for branches an agent writes: the failure names each commit and the commands that take the attributions back off, in the job log and on the run summary.
+
+```yaml
+name: AI attributions
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ai-attributions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: andornaut/ai-attributions@main
+```
+
+Input | Default | What it is
+--- | --- | ---
+`base` | the pull request's base branch, else the commit the push started from, else the default branch | the ref the branch is measured against
+`version` | `dev` | the release to install
+`path` | `.` | the repository to scan, relative to the workspace
+
+There are two halves to pin, and no tag to pin them to yet: the ref decides which `action.yml` runs, and `version` decides which binary it installs. `dev` is re-cut on every push to `main`, so both halves track `main` until a `v*` tag exists. Then they move together: `uses: andornaut/ai-attributions@v1.0.0` with `version: v1.0.0`.
+
+The action downloads the linux archive, checks it against `checksums.txt` and puts it on `PATH`, so the runner needs no Go and no `git-filter-repo`. It runs on `ubuntu-latest` and on arm64 runners; other platforms have no archive to install and fail with that.
+
+`fetch-depth: 0` is worth setting but not required: a shallow walk would report fewer commits than the branch adds rather than fail, so the action deepens a shallow checkout itself, at the cost of a second fetch.
+
+A pull request is checked out at a merge commit with `HEAD` detached, which is no branch to scan and not the history under review either. The action scans the branch the pull request asks to merge, at `pull_request.head.sha`, and names it in the failure.
 
 ### Backups
 

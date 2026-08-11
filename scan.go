@@ -123,8 +123,8 @@ func mapping(field, name, address string, who identity) string {
 }
 
 // report prints the tallies, and every commit behind them under -verbose.
-func (f findings) report(verbose bool, refs []string) {
-	scope := strings.Join(refs, ", ")
+// scope names the history the counts answer for.
+func (f findings) report(verbose bool, scope string) {
 	if f.flagged == 0 {
 		fmt.Printf("no AI attributions in %d commits, across %s\n", f.commits, scope)
 		f.reportEmdashesLeft()
@@ -265,7 +265,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		}
 		// A ref that cannot be walked is called out rather than skipped, so an
 		// unreadable branch does not read as a clean one.
-		commits, err := repo.CommitsNotIn(localRefs, ref)
+		commits, err := repo.CommitsNotIn(localRefs, []string{ref})
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))
 			continue

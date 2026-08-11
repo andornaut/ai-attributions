@@ -199,10 +199,12 @@ func (r *Repo) Commits(refs []string) ([]Commit, error) {
 	return r.parseCommits(args)
 }
 
-// CommitsNotIn returns the commits reachable from ref but not from any of
+// CommitsNotIn returns the commits reachable from refs but not from any of
 // exclude.
-func (r *Repo) CommitsNotIn(exclude []string, ref string) ([]Commit, error) {
-	args := append([]string{"log", "-z", commitFormat, ref, "--not"}, exclude...)
+func (r *Repo) CommitsNotIn(exclude []string, refs []string) ([]Commit, error) {
+	args := append([]string{"log", "-z", commitFormat}, refs...)
+	args = append(args, "--not")
+	args = append(args, exclude...)
 	return r.parseCommits(args)
 }
 
