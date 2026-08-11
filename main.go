@@ -151,11 +151,18 @@ func run(argv []string) error {
 	}
 	cfg.remote = targetRemote(repo)
 
+	// backups and restore only put back refs this tool saved, so they stay
+	// available whatever the repository is.
 	switch cfg.command {
 	case "backups":
 		return listBackups(repo)
 	case "restore":
 		return restoreBackup(repo, stamp)
+	}
+
+	if upstream, isFork := forkUpstream(repo); isFork {
+		reportFork(repo, upstream)
+		return nil
 	}
 	return scan(repo, cfg)
 }
@@ -260,6 +267,37 @@ func scan(repo *gitexec.Repo, cfg config) error {
 		return nil
 	}
 	return apply(repo, cfg, refs, found.changes)
+}
+
+// forkUpstream returns the remote through which a fork tracks the project it
+// was forked from. A remote named upstream is the convention that git and gh
+// set up; a second remote pointing at a different project is the general case.
+func forkUpstream(repo *gitexec.Repo) (gitexec.Remote, bool) {
+	remotes, err := repo.Remotes()
+	if err != nil || len(remotes) < 2 {
+		return gitexec.Remote{}, false
+	}
+
+	for _, remote := range remotes {
+		if remote.Name == "upstream" {
+			return remote, true
+		}
+	}
+	for _, remote := range remotes {
+		if remote.Project != remotes[0].Project {
+			return remote, true
+		}
+	}
+	return gitexec.Remote{}, false
+}
+
+// reportFork says why the repository was passed over. A fork's history is
+// mostly another project's, and those commits are that project's record: the
+// attributions in them belong to the people who wrote them.
+func reportFork(repo *gitexec.Repo, upstream gitexec.Remote) {
+	fmt.Printf("skipping %s: a fork, tracking %s through the %s remote\n",
+		repo.Dir(), upstream.Project, upstream.Name)
+	fmt.Println("history that arrives from another project is not this repository's to rewrite")
 }
 
 // targetRemote is the remote the current branch tracks. A branch pushed

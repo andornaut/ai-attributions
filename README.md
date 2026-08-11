@@ -189,6 +189,20 @@ ai-attributions --exit-code
 
 It needs no git identity configured, and it answers for the refs in scope, the same set `apply` rewrites. A remote branch the report names is not counted, since no `apply` in this repository would fix it.
 
+### Forks
+
+A fork is skipped whole, before anything is scanned. Most of its history belongs to the project it was forked from, and those commits are that project's record: the attributions in them name the people who wrote them, and re-attributing one would claim their work.
+
+```console
+$ ai-attributions ~/src/qmk_firmware
+skipping /home/andornaut/src/github.com/andornaut/qmk_firmware: a fork, tracking github.com/qmk/qmk_firmware through the upstream remote
+history that arrives from another project is not this repository's to rewrite
+```
+
+A repository counts as a fork when it has a remote named `upstream`, which is what `git` and `gh repo fork` set up, or when a second remote points at a different project. Remote URLs are compared as `host/owner/repo`, so the same project over ssh and https is one project and a mirror of your own repository is not a fork.
+
+Nothing is reported and the exit status is 0, including under `--exit-code`, so a fork does not fail a CI gate over commits it was never going to fix. `backups` and `restore` still work, since they only put back refs this tool saved.
+
 ### Remote branches
 
 `scan` and `apply` cover the same refs. `--all` and `--exclude` move that set, and they move it for both, so what a scan reports is what an apply rewrites.
@@ -224,6 +238,7 @@ A commit whose message is not valid UTF-8 is reported and skipped, because rewri
 - Only commit messages and identities are rewritten. File contents are untouched.
 - Annotated tag messages are not scanned, though tags are repointed at the rewritten commits.
 - Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported either.
+- A fork is skipped without inspection, so an attribution on a commit of your own that happens to live in a fork is left alone with the rest.
 - GPG signatures are dropped across the rewritten range. `git-filter-repo` works through `git fast-export`, which does not carry the `gpgsig` header. Rewriting a message invalidates that commit's signature anyway, but commits whose messages did not change lose theirs too.
 
 ## Developing

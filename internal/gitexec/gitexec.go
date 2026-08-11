@@ -242,6 +242,57 @@ func (r *Repo) UpdateRef(hash, ref string) error {
 	return err
 }
 
+// Remote is a configured remote and the project its URL points at.
+type Remote struct {
+	Name    string
+	URL     string
+	Project string
+}
+
+// Remotes returns every configured remote.
+func (r *Repo) Remotes() ([]Remote, error) {
+	out, err := r.Output("config", "--get-regexp", `^remote\..*\.url$`)
+	if err != nil {
+		// A repository with no remotes has nothing to report, which git
+		// signals by exiting non-zero.
+		return nil, nil
+	}
+
+	var remotes []Remote
+	for line := range strings.SplitSeq(out, "\n") {
+		key, url, found := strings.Cut(strings.TrimSpace(line), " ")
+		if !found {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")
+		remotes = append(remotes, Remote{Name: name, URL: url, Project: project(url)})
+	}
+	return remotes, nil
+}
+
+// project reduces a remote URL to host/owner/repo, so that the same project
+// reached over ssh and over https compares equal and two different projects
+// do not.
+func project(url string) string {
+	trimmed := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
+
+	if scheme, rest, found := strings.Cut(trimmed, "://"); found {
+		_ = scheme
+		if _, after, hasUser := strings.Cut(rest, "@"); hasUser {
+			rest = after
+		}
+		return rest
+	}
+
+	// The scp-like form, git@host:owner/repo, which has no scheme.
+	if _, rest, found := strings.Cut(trimmed, "@"); found {
+		if host, path, ok := strings.Cut(rest, ":"); ok {
+			return host + "/" + path
+		}
+	}
+	return trimmed
+}
+
 // HasRemote reports whether the named remote is configured.
 func (r *Repo) HasRemote(name string) bool {
 	out, err := r.Output("remote")
