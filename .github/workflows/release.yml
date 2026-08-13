@@ -29,12 +29,26 @@ concurrency:
 jobs:
   # Publishing waits on the scan as well: a release is a durable artifact, and
   # taking an attribution back off after one is cut means rewriting history that
-  # has already been published. Called only where a release can follow, since
-  # the scan workflow already runs on every push and pull request of its own
-  # accord.
+  # has already been published. Run only where a release can follow, since the
+  # scan workflow already runs on every push and pull request of its own accord.
   attributions:
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
-    uses: ./.github/workflows/ai-attributions.yml
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      # The released binary this action.yml defaults to, rather than the `dev`
+      # the scan workflow installs: gating this repository's own release on the
+      # rolling build lets a broken one block the release that would replace it.
+      # A released version cannot go that way, being immutable and already
+      # published. The action definition is still the one in this checkout, so a
+      # change that breaks the install script stops the release it arrived in.
+      - name: Scan the branch
+        uses: ./
 
   # Publishing waits on the same suite that guards main, rather than on the
   # build alone: something that compiles everywhere still ships whatever the
