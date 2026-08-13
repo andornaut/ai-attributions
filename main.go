@@ -57,9 +57,8 @@ const (
 // printed in full.
 var out io.Writer = os.Stdout
 
-// said records whether any report has been written, so that a failure is
-// separated from the report above it without opening the output with a blank
-// line when there is nothing above it.
+// said records whether any report has been written, so that a failure with
+// nothing above it does not open the output with a blank line.
 var said bool
 
 // say writes one piece of the report. The write error is dropped: a report that
@@ -88,7 +87,11 @@ func reportNothingToRewrite(cfg config) {
 // reportFailure writes the line that says a run could not complete. It goes to
 // stderr, so a caller can redirect the report and still see what went wrong.
 func reportFailure(format string, args ...any) {
-	if said {
+	// The blank line separates the failure from the report above it, which it
+	// can only do when both land in the same place. A report redirected
+	// elsewhere leaves the failure alone on the stream, with nothing above it
+	// to be separated from.
+	if said && interleaved {
 		fmt.Fprintln(os.Stderr)
 	}
 	fmt.Fprintf(os.Stderr, "%s %s\n",
@@ -298,6 +301,9 @@ func runRepo(cfg config, stamp, repoPath string) (outcome, error) {
 	}
 	if isFork {
 		reportFork(repo, upstream)
+		if cfg.applying() {
+			reportDone("nothing examined, a fork is not this repository's to rewrite")
+		}
 		return outcomeSkipped, nil
 	}
 	return scan(repo, cfg)

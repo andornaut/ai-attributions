@@ -1,10 +1,63 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
+
+// capture collects what a run writes to the report.
+func capture(t *testing.T, run func()) string {
+	t.Helper()
+	previous := out
+	defer func() { out = previous }()
+
+	buf := &bytes.Buffer{}
+	out = buf
+	run()
+	return buf.String()
+}
+
+// Every apply that ran to the end closes with a done: line, so a report ending
+// without one is a run that stopped part way. A fork is examined by nothing and
+// still says how it ended.
+func TestApplyReportsHowItEnded(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(git func(args ...string))
+	}{
+		{
+			name:  "a repository with nothing to rewrite",
+			setup: func(func(args ...string)) {},
+		},
+		{
+			name: "a fork, which is not examined",
+			setup: func(git func(args ...string)) {
+				git("remote", "add", "origin", "git@github.com:andornaut/qmk_firmware.git")
+				git("remote", "add", "upstream", "https://github.com/qmk/qmk_firmware.git")
+				fetched(git, "upstream")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, git := gitRepo(t)
+			tt.setup(git)
+
+			report := capture(t, func() {
+				if _, err := runRepo(config{command: "apply"}, "", repo.Dir()); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if !strings.Contains(report, "\ndone: ") {
+				t.Errorf("apply reported %q, want a done: line", report)
+			}
+		})
+	}
+}
 
 // A pattern matches the full ref or any of its short forms, so that the name a
 // branch or tag is known by works as well as the ref it resolves to.

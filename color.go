@@ -33,6 +33,23 @@ func isTerminal(f *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// interleaved reports whether the report and the failures land in the same
+// place, one terminal or one redirect, which is what makes a line written to
+// one of them read as following the other.
+var interleaved = sameFile(os.Stdout, os.Stderr)
+
+func sameFile(a, b *os.File) bool {
+	first, err := a.Stat()
+	if err != nil {
+		return false
+	}
+	second, err := b.Stat()
+	if err != nil {
+		return false
+	}
+	return os.SameFile(first, second)
+}
+
 func paint(enabled bool, color, text string) string {
 	if !enabled {
 		return text
