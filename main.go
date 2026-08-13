@@ -57,11 +57,42 @@ const (
 // printed in full.
 var out io.Writer = os.Stdout
 
+// said records whether any report has been written, so that a failure is
+// separated from the report above it without opening the output with a blank
+// line when there is nothing above it.
+var said bool
+
 // say writes one piece of the report. The write error is dropped: a report that
 // cannot reach a closed stdout is not a reason to fail a rewrite that worked,
 // and every caller would otherwise carry a check it has no answer for.
 func say(format string, args ...any) {
+	said = true
 	_, _ = fmt.Fprintf(out, format, args...)
+}
+
+// reportDone closes an apply that completed, so that a report ending without
+// this line is a run that stopped part way rather than one that finished with
+// little to say.
+func reportDone(format string, args ...any) {
+	say("\n%s %s\n", paint(colorOut, green, "done:"), fmt.Sprintf(format, args...))
+}
+
+// reportNothingToRewrite closes an apply that had nothing to do, so that every
+// apply that ran to the end says so, whether or not it changed anything.
+func reportNothingToRewrite(cfg config) {
+	if cfg.applying() {
+		reportDone("nothing to rewrite")
+	}
+}
+
+// reportFailure writes the line that says a run could not complete. It goes to
+// stderr, so a caller can redirect the report and still see what went wrong.
+func reportFailure(format string, args ...any) {
+	if said {
+		fmt.Fprintln(os.Stderr)
+	}
+	fmt.Fprintf(os.Stderr, "%s %s\n",
+		paint(colorErr, red, "ai-attributions: error:"), fmt.Sprintf(format, args...))
 }
 
 // outcome is how one repository's run ended. It is what a sweep lists per
@@ -84,6 +115,19 @@ func (o outcome) String() string {
 		return "skipped"
 	default:
 		return "clean"
+	}
+}
+
+// color marks what a sweep's line means without reading it: nothing to do,
+// something found, or a repository that was not examined.
+func (o outcome) color() string {
+	switch o {
+	case outcomeFound:
+		return yellow
+	case outcomeSkipped:
+		return blue
+	default:
+		return green
 	}
 }
 
@@ -187,7 +231,7 @@ func main() {
 	if err != nil {
 		// Every failure exits 2, the status the flag package already uses, so a
 		// caller can tell a finding from a run that could not look.
-		fmt.Fprintf(os.Stderr, "ai-attributions: %v\n", err)
+		reportFailure("%v", err)
 		os.Exit(2)
 	}
 	os.Exit(status)
@@ -283,7 +327,7 @@ func sweep(cfg config, stamp string, paths []string) int {
 			say("=== %s\n", repoPath)
 			if _, err := runRepo(cfg, stamp, repoPath); err != nil {
 				failed = true
-				fmt.Fprintf(os.Stderr, "ai-attributions: %s: %v\n", repoPath, err)
+				reportFailure("%s: %v", repoPath, err)
 			}
 			continue
 		}
@@ -300,15 +344,15 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// itself goes to stderr, where a single run puts it.
 		if err != nil {
 			failed = true
-			say("%-8s %s\n", "failed", repoPath)
-			fmt.Fprintf(os.Stderr, "ai-attributions: %s: %v\n", repoPath, err)
+			say("%s %s\n", column(colorOut, red, "failed"), repoPath)
+			reportFailure("%s: %v", repoPath, err)
 			// Whatever the run reported before it failed is still worth having:
 			// an apply that failed at the push has already named the backup it
 			// saved and the refs it moved.
 			reports = append(reports, result{path: repoPath, report: buf.String()})
 			continue
 		}
-		say("%-8s %s\n", ended, repoPath)
+		say("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		switch ended {
 		case outcomeFound:
 			found = true
@@ -407,6 +451,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 			say("no commits to inspect: %s adds nothing over %s\n",
 				strings.Join(refs, ", "), cfg.base)
 		}
+		reportNothingToRewrite(cfg)
 		return outcomeClean, nil
 	}
 	// Trailers are the point of the tool. Emdashes are asked for: they move no
@@ -433,6 +478,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	}
 
 	if found.flagged == 0 {
+		reportNothingToRewrite(cfg)
 		return outcomeClean, nil
 	}
 	if !cfg.applying() {
@@ -543,8 +589,8 @@ func ownProject(remotes []gitexec.Remote, own string) string {
 }
 
 func reportFork(repo *gitexec.Repo, upstream gitexec.Remote) {
-	say("skipping %s: a fork, tracking %s through the %s remote\n",
-		repo.Dir(), upstream.Project, upstream.Name)
+	say("%s %s: a fork, tracking %s through the %s remote\n",
+		paint(colorOut, blue, "skipping"), repo.Dir(), upstream.Project, upstream.Name)
 	say("history that arrives from another project is not this repository's to rewrite\n")
 }
 
@@ -701,7 +747,7 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 
 	publish := publishable(targets)
 	if len(publish) == 0 {
-		say("\nno ref moved, so there is nothing to push\n")
+		reportDone("no ref moved, so there is nothing to push")
 		return nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
@@ -715,10 +761,15 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 
 	if cfg.push {
 		say("\npushing to %s\n", cfg.remote)
-		return repo.Run(pushArgs(cfg.remote, publish)...)
+		if err := repo.Run(pushArgs(cfg.remote, publish)...); err != nil {
+			return err
+		}
+		reportDone("the history is rewritten and pushed to %s", cfg.remote)
+		return nil
 	}
-	say("\nnot pushed. To publish the rewrite:\n\n    git %s\n\n",
+	say("\nnot pushed. To publish the rewrite:\n\n    git %s\n",
 		strings.Join(pushArgs(cfg.remote, publish), " "))
+	reportDone("the history is rewritten here, and not pushed")
 	return nil
 }
 

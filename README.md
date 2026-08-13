@@ -119,6 +119,22 @@ Every flag takes one dash or two. The documentation uses two.
 > [!IMPORTANT]
 > Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history. The count is printed before anything is rewritten.
 
+### Reading the report
+
+`apply` closes with a `done:` line naming what it did, so a report that ends without one is a run that stopped part way. A failure goes to stderr as `ai-attributions: error: <what went wrong>`, separated from the report above it, and exits 2.
+
+```console
+$ ai-attributions apply --push ~/src/example
+...
+done: the history is rewritten and pushed to origin
+
+$ ai-attributions apply --push ~/src/example
+...
+ai-attributions: error: the working tree has uncommitted changes; commit or stash them first
+```
+
+Those markers are colored when the stream is a terminal: green for a run that finished, yellow for a repository carrying attributions, blue for one that was not examined, red for a failure. A report that is piped or redirected stays plain text, a CI log included, as does a run with `NO_COLOR` set.
+
 ### Trailers and footers
 
 These trailer keys are dropped when the value names an agent: `Co-authored-by`, `Coauthored-by`, `Assisted-by`, `AI-assisted-by`, `Generated-by`, `Generated-with`, `Signed-off-by`. A `<agent>-Session` key (`claude`, `codex`, `cursor`, `devin`, `agent`, `ai`) is dropped on the key alone.
