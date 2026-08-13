@@ -41,14 +41,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The released binary this action.yml defaults to, rather than the `dev`
-      # the scan workflow installs: gating this repository's own release on the
-      # rolling build lets a broken one block the release that would replace it.
-      # A released version cannot go that way, being immutable and already
-      # published. The action definition is still the one in this checkout, so a
-      # change that breaks the install script stops the release it arrived in.
+      # The published action, the same one every other repository runs, and not
+      # `./`: a tagged commit names its own release in action.yml, so the
+      # checkout here would install a version that this run has not published
+      # yet. `@v1` names the last release either way, which is already on disk
+      # and cannot be moved. The scan workflow still runs `./` against `dev`, so
+      # a change to either half is exercised on every push regardless.
       - name: Scan the branch
-        uses: ./
+        uses: andornaut/ai-attributions@v1
 
   # Publishing waits on the same suite that guards main, rather than on the
   # build alone: something that compiles everywhere still ships whatever the
