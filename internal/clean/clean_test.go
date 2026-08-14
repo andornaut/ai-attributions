@@ -78,13 +78,19 @@ func TestApply(t *testing.T) {
 			want: "refactor the parser - it was unreadable\n",
 		},
 		{
-			name: "unspaced dash becomes a hyphen",
+			name: "unspaced emdash becomes a hyphen",
 			opts: both,
-			in:   "support the read—write split over 3–5 nodes\n",
-			want: "support the read-write split over 3-5 nodes\n",
+			in:   "support the read—write split\n",
+			want: "support the read-write split\n",
 		},
 		{
-			name: "a run of dashes becomes one hyphen",
+			name: "the figure dash and the horizontal bar are left alone",
+			opts: both,
+			in:   "run over 3–5 nodes, pages 10‒12, a bar ― here\n",
+			want: "run over 3-5 nodes, pages 10‒12, a bar ― here\n",
+		},
+		{
+			name: "a run of emdashes becomes one hyphen",
 			opts: both,
 			in:   "drop the cache ——— it was wrong\n",
 			want: "drop the cache - it was wrong\n",

@@ -78,13 +78,15 @@ var attributionKeys = map[string]bool{
 	"signed-off-by":  true,
 }
 
-// dashes are the characters a rewrite replaces with a hyphen: emdashes,
-// endashes, figure dashes and horizontal bars.
-const dashes = "‒–—―"
+// dashes are the characters a rewrite replaces with a hyphen: the emdash and
+// the endash, both of which a hyphen says as well. The figure dash and the
+// horizontal bar are left alone, being typography for a numeric span and for
+// quoted speech rather than punctuation a hyphen stands in for.
+const dashes = "—–"
 
-// urlOrDashRe matches a URL or a run of dashes. The URL alternative comes first
-// and is matched only to step over it, since a dash inside one is part of the
-// address rather than punctuation.
+// urlOrDashRe matches a URL or a run of those dashes. The URL alternative comes
+// first and is matched only to step over it, since a dash inside one is part of
+// the address rather than punctuation.
 var urlOrDashRe = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s<>]+|[` + dashes + `]+`)
 
 // Apply returns msg with the selected transformations applied, along with what
@@ -231,12 +233,12 @@ func collapseBlanks(lines []string) []string {
 	return out
 }
 
-// replaceDashes rewrites emdashes, endashes, and their relatives as hyphens,
-// whatever the dash is doing: a run of them is one hyphen, and the spacing
-// around it is left as it was.
+// replaceDashes rewrites an emdash or an endash as a hyphen, whatever the dash
+// is doing: a run of them is one hyphen, and the spacing around it is left as it
+// was.
 func replaceDashes(line string) string {
-	// Most lines hold no dash at all, and the scan reads every line of every
-	// commit message.
+	// Most lines hold no such dash at all, and the scan reads every line of
+	// every commit message.
 	if !strings.ContainsAny(line, dashes) {
 		return line
 	}

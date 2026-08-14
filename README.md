@@ -186,7 +186,7 @@ Scanning reports agent identities without an identity configured; only `apply` r
 
 Off unless `--emdashes` asks for it: a typographic mark is a house style rather than an ad, so attributions alone decide what a run finds by default. Asking makes an emdash a finding in its own right, counted toward `--exit-code` and rewritten wherever it appears, so a build the flag fails is a build the `apply` it names fixes. Without the flag, an emdash is not looked at.
 
-Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of them becomes one, and the spacing around them is left as it was: `the parser — which is old — broke` becomes `the parser - which is old - broke`, and `read—write` becomes `read-write`. A dash inside a URL is part of the address, so it is left alone.
+An emdash or an endash becomes a hyphen, a run of them becomes one, and the spacing around them is left as it was: `the parser — which is old — broke` becomes `the parser - which is old - broke`, and `read—write` becomes `read-write`. The figure dash and the horizontal bar are not touched, being typography for a numeric span and for quoted speech rather than punctuation a hyphen stands in for. A dash inside a URL is part of the address, so it is left alone.
 
 ### Agent instruction files
 
