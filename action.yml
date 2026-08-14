@@ -183,6 +183,7 @@ runs:
       shell: bash
       env:
         INPUT_IDENTITY: ${{ inputs.identity }}
+        INPUT_VERSION: ${{ inputs.version }}
         INPUT_EMDASHES: ${{ inputs.emdashes }}
         INPUT_AGENTS_FILES: ${{ inputs.agents-files }}
       run: |
@@ -206,14 +207,16 @@ runs:
         # so the binary exits 2 on an unknown flag, and --emdashes meant a
         # tidy-up riding along on a commit an attribution already moved, so an
         # emdash-only commit passes green under an input whose description says
-        # it fails. A version that is not a release, dev for instance, is taken
-        # at its word: it is built from main and has whatever main has.
+        # it fails. Read from the input rather than from the binary, which names
+        # itself for the commit it was built at: a dev build reports a v0.0.0
+        # pseudo-version and would fail a check on its own version. A version
+        # input that is not a release, dev for instance, is taken at its word: it
+        # is built from main and has whatever main has.
         if [ "$INPUT_EMDASHES" = true ] || [ "$INPUT_AGENTS_FILES" = true ]; then
-          installed=$(ai-attributions version)
-          case "$installed" in
+          case "$INPUT_VERSION" in
             v[0-9]*)
-              if [ "$(printf '%s\n%s\n' v1.3.0 "$installed" | sort -V | head -1)" != v1.3.0 ]; then
-                echo "::error::emdashes and agents-files need ai-attributions v1.3.0 or newer, and version: names $installed"
+              if [ "$(printf '%s\n%s\n' v1.3.0 "$INPUT_VERSION" | sort -V | head -1)" != v1.3.0 ]; then
+                echo "::error::emdashes and agents-files need ai-attributions v1.3.0 or newer, and version: names $INPUT_VERSION"
                 exit 1
               fi
               ;;
