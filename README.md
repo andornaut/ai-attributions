@@ -268,10 +268,12 @@ The status is the worst of what the sweep saw: 2 if any repository failed, then 
 `--quiet` holds the report back and prints it only for a repository that found something. A sweep of thirty clean checkouts writes nothing at all and exits 0, which is what a cron job wants: mail arrives on the days that need an answer, and no others.
 
 ```bash
-0 4 * * * ai-attributions scan --quiet --exit-code ~/src/github.com/andornaut/*
+0 4 * * * ai-attributions scan --quiet ~/src/github.com/andornaut/*
 ```
 
-A fork counts as nothing to answer for, since it is the same fork every day. A failure always prints, both the summary line and whatever the run got as far as, because a run that could not look is not a run that found nothing. The status is unaffected: `--quiet` decides what is written, not what is reported.
+A fork counts as nothing to answer for, since it is the same fork every day. A failure always prints, both the summary line and whatever the run got as far as, because a run that could not look is not a run that found nothing. So does a remote branch carrying attributions, which is counted in no status and would otherwise be the one finding `--quiet` dropped, the refs in scope being what the status answers for.
+
+A non-zero status always comes with the report that explains it, which is why the line above leaves `--exit-code` off. Add it for a caller that reads the status rather than the mail, and a fork then prints the notice behind its 3 rather than exiting silently. The status itself is unaffected either way: `--quiet` decides what is written, not what is reported.
 
 It belongs to `scan` and `apply`. What `backups` and `restore` print is the whole point of running them, so they reject it.
 

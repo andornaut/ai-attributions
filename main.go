@@ -67,6 +67,13 @@ var out io.Writer = os.Stdout
 // nothing above it does not open the output with a blank line.
 var said bool
 
+// noteworthy records whether the report holds something a scheduled run has to
+// see, which the outcome cannot answer on its own: a remote branch carrying
+// attributions is worth naming and moves no status, the refs in scope being
+// what the status answers for. Without this, --quiet weighs a report by its
+// outcome and drops the one finding that has none.
+var noteworthy bool
+
 // say writes one piece of the report. The write error is dropped: a report that
 // cannot reach a closed stdout is not a reason to fail a rewrite that worked,
 // and every caller would otherwise carry a check it has no answer for.
@@ -293,17 +300,25 @@ func run(argv []string) (int, error) {
 	return found.status(cfg), nil
 }
 
+// worthSaying reports whether a --quiet run has to print what it buffered. A
+// finding and a failure are the obvious two. The third is a status the caller
+// will read: a non-zero exit with nothing above it names no repository and no
+// reason, which is the one answer a scheduled run cannot act on.
+func worthSaying(cfg config, ended outcome, err error) bool {
+	return err != nil || ended == outcomeFound || noteworthy || ended.status(cfg) != 0
+}
+
 // quietRepo runs one repository with the report held in a buffer, and writes it
 // out only when there is something to answer for. A failure prints what the run
 // got as far as: a run that could not look is not a run that found nothing.
 func quietRepo(cfg config, stamp, repoPath string) (int, error) {
 	previous, saidBefore := out, said
 	buf := &bytes.Buffer{}
-	out = buf
+	out, noteworthy = buf, false
 	found, err := runRepo(cfg, stamp, repoPath)
 	out = previous
 
-	if err != nil || found == outcomeFound {
+	if worthSaying(cfg, found, err) {
 		_, _ = io.Copy(out, buf)
 	} else {
 		// Nothing reached the stream after all, so a failure printed later must
@@ -381,7 +396,7 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// Buffered so that a clean repository costs one line rather than a
 		// screen, which is what makes a sweep of many readable at all.
 		buf := &bytes.Buffer{}
-		out = buf
+		out, noteworthy = buf, false
 		ended, err := runRepo(cfg, stamp, repoPath)
 		out = previous
 
@@ -398,11 +413,12 @@ func sweep(cfg config, stamp string, paths []string) int {
 			reports = append(reports, result{path: repoPath, report: buf.String()})
 			continue
 		}
-		// --quiet keeps the line and the report for a repository that found
-		// something, and drops both for one that did not, so a sweep of thirty
-		// clean checkouts says nothing at all. A fork counts as nothing to
-		// answer for: it is the same fork every day.
-		speak := !cfg.quiet || ended == outcomeFound
+		// --quiet keeps the line and the report for a repository worth
+		// answering for, and drops both for one that is not, so a sweep of
+		// thirty clean checkouts says nothing at all. A fork is nothing to
+		// answer for, being the same fork every day, until --exit-code makes it
+		// a status the caller reads.
+		speak := !cfg.quiet || worthSaying(cfg, ended, nil)
 		if speak {
 			say("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		}

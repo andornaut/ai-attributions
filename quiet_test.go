@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
 func TestQuietPrintsOnlyWhatThereIsToAnswerFor(t *testing.T) {
@@ -76,6 +78,74 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	})
 	if got != want {
 		t.Errorf("--quiet exited %d, the same run without it exited %d", got, want)
+	}
+}
+
+// A remote branch carrying attributions is counted in no status, the refs in
+// scope being what the status answers for. --quiet weighing the report by its
+// outcome would drop the finding entirely, which is the one thing a scheduled
+// sweep exists to surface.
+func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("remote", "add", "origin", "https://github.com/example/thing.git")
+	git("commit", "--quiet", "--allow-empty",
+		"--message=Branch work\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
+	git("update-ref", "refs/remotes/origin/feature", "HEAD")
+	git("reset", "--quiet", "--hard", "HEAD~1")
+
+	var status int
+	report := captureReport(t, func() {
+		var err error
+		if status, err = quietRepo(config{command: "scan", quiet: true, exitCode: true}, "", repo.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(report, "refs/remotes/origin/feature") {
+		t.Errorf("--quiet dropped the remote branch carrying an attribution:\n%s", report)
+	}
+	// Printing it does not make it count: the status answers for the refs in
+	// scope, and a remote branch is not one of them.
+	if status != 0 {
+		t.Errorf("a remote-only finding exited %d, want 0", status)
+	}
+}
+
+// A status the caller reads has to name a reason. Without --exit-code there is
+// no status to explain, so the same run stays silent.
+func TestQuietExplainsANonZeroStatus(t *testing.T) {
+	setup := func(t *testing.T) *gitexec.Repo {
+		t.Helper()
+		repo, git := gitRepo(t)
+		git("remote", "add", "origin", "git@github.com:andornaut/qmk_firmware.git")
+		git("remote", "add", "upstream", "https://github.com/qmk/qmk_firmware.git")
+		fetched(git, "upstream")
+		return repo
+	}
+
+	repo := setup(t)
+	var status int
+	report := captureReport(t, func() {
+		var err error
+		if status, err = quietRepo(config{command: "scan", quiet: true, exitCode: true}, "", repo.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if status != 3 {
+		t.Fatalf("a fork exited %d, want 3", status)
+	}
+	if !strings.Contains(report, "a fork") {
+		t.Errorf("exit 3 came with nothing naming the repository or the reason:\n%s", report)
+	}
+
+	repo = setup(t)
+	silent := captureReport(t, func() {
+		if _, err := quietRepo(config{command: "scan", quiet: true}, "", repo.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if silent != "" {
+		t.Errorf("a fork spoke with no status to explain:\n%s", silent)
 	}
 }
 

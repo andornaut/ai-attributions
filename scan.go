@@ -370,7 +370,11 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		}
 	}
 
+	// Both blocks below name work that is still to do and move no status, the
+	// refs in scope being what the status answers for. Marking them keeps
+	// --quiet from weighing this report by an outcome it never produces.
 	if len(stale) > 0 {
+		noteworthy = true
 		say("\nnaming history this repository has already rewritten locally: %s\n",
 			strings.Join(stale, ", "))
 		say("pushing the rewrite settles these; until then the remote still holds what it started from\n")
@@ -379,6 +383,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		return nil
 	}
 
+	noteworthy = true
 	say("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
 	for _, line := range lines {
 		say("%s\n", line)

@@ -201,10 +201,28 @@ runs:
           set -- "$@" --base "$AI_ATTRIBUTIONS_BASE"
         fi
 
+        # Both flags landed in v1.3.0, and an older pin is refused rather than
+        # asked a question it answers differently: --agents-files did not exist,
+        # so the binary exits 2 on an unknown flag, and --emdashes meant a
+        # tidy-up riding along on a commit an attribution already moved, so an
+        # emdash-only commit passes green under an input whose description says
+        # it fails. A version that is not a release, dev for instance, is taken
+        # at its word: it is built from main and has whatever main has.
+        if [ "$INPUT_EMDASHES" = true ] || [ "$INPUT_AGENTS_FILES" = true ]; then
+          installed=$(ai-attributions version)
+          case "$installed" in
+            v[0-9]*)
+              if [ "$(printf '%s\n%s\n' v1.3.0 "$installed" | sort -V | head -1)" != v1.3.0 ]; then
+                echo "::error::emdashes and agents-files need ai-attributions v1.3.0 or newer, and version: names $installed"
+                exit 1
+              fi
+              ;;
+          esac
+        fi
+
         # Anything but true or false is refused rather than read as false: a
         # typo would otherwise turn off the check the workflow asked for and
-        # report a pass nobody looked for. Both flags reach the binary only when
-        # the version installed above has them.
+        # report a pass nobody looked for.
         case "$INPUT_EMDASHES" in
           true) set -- "$@" --emdashes ;;
           false | "") ;;
