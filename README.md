@@ -36,7 +36,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then they are a finding of their own
 - [Agent instruction files](#agent-instruction-files) a ref ships are reported where `--agents-files` asks for them
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
-- [Several repositories](#sweeping-several-repositories) in one run, summarized a line each
+- [Several repositories](#sweeping-several-repositories) in one run, summarized a line each, and [`--quiet`](#quiet-runs) so a scheduled sweep speaks only when it finds something
 - [`--exit-code`](#catching-them-before-they-land) exits 1 when anything is found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
 - [Backups](#backups) - the pre-rewrite refs are saved, and `restore` puts one run back
 
@@ -104,6 +104,8 @@ flags:
     	identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
   -push
     	force push the rewritten refs (apply only)
+  -quiet
+    	print nothing unless a repository found something, for a scheduled run
   -verbose
     	report every commit rather than a summary
 ```
@@ -260,6 +262,18 @@ skipped  /home/andornaut/src/github.com/andornaut/qmk_firmware
 The status is the worst of what the sweep saw: 2 if any repository failed, then 1 if any found something, then 3 if any was skipped. It does not depend on the order the paths were given in.
 
 `backups` and `restore` report rather than scan, so they have no finding to summarize and print under a `=== <path>` heading instead.
+
+### Quiet runs
+
+`--quiet` holds the report back and prints it only for a repository that found something. A sweep of thirty clean checkouts writes nothing at all and exits 0, which is what a cron job wants: mail arrives on the days that need an answer, and no others.
+
+```bash
+0 4 * * * ai-attributions scan --quiet --exit-code ~/src/github.com/andornaut/*
+```
+
+A fork counts as nothing to answer for, since it is the same fork every day. A failure always prints, both the summary line and whatever the run got as far as, because a run that could not look is not a run that found nothing. The status is unaffected: `--quiet` decides what is written, not what is reported.
+
+It belongs to `scan` and `apply`. What `backups` and `restore` print is the whole point of running them, so they reject it.
 
 ### Catching them before they land
 

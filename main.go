@@ -182,7 +182,10 @@ type config struct {
 	exitCode      bool
 	identity      string
 	push          bool
-	verbose       bool
+	// quiet holds the report back unless the run has something to answer for,
+	// which is what lets a scheduled run mail only the days that need one.
+	quiet   bool
+	verbose bool
 
 	// remote is resolved from the branch's upstream, rather than assumed to be
 	// origin.
@@ -280,7 +283,33 @@ func run(argv []string) (int, error) {
 		return sweep(cfg, stamp, args), nil
 	}
 
+	if cfg.quiet {
+		return quietRepo(cfg, stamp, args[0])
+	}
 	found, err := runRepo(cfg, stamp, args[0])
+	if err != nil {
+		return 0, err
+	}
+	return found.status(cfg), nil
+}
+
+// quietRepo runs one repository with the report held in a buffer, and writes it
+// out only when there is something to answer for. A failure prints what the run
+// got as far as: a run that could not look is not a run that found nothing.
+func quietRepo(cfg config, stamp, repoPath string) (int, error) {
+	previous, saidBefore := out, said
+	buf := &bytes.Buffer{}
+	out = buf
+	found, err := runRepo(cfg, stamp, repoPath)
+	out = previous
+
+	if err != nil || found == outcomeFound {
+		_, _ = io.Copy(out, buf)
+	} else {
+		// Nothing reached the stream after all, so a failure printed later must
+		// not be spaced away from a report nobody saw.
+		said = saidBefore
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -369,14 +398,21 @@ func sweep(cfg config, stamp string, paths []string) int {
 			reports = append(reports, result{path: repoPath, report: buf.String()})
 			continue
 		}
-		say("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
+		// --quiet keeps the line and the report for a repository that found
+		// something, and drops both for one that did not, so a sweep of thirty
+		// clean checkouts says nothing at all. A fork counts as nothing to
+		// answer for: it is the same fork every day.
+		speak := !cfg.quiet || ended == outcomeFound
+		if speak {
+			say("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
+		}
 		switch ended {
 		case outcomeFound:
 			found = true
 		case outcomeSkipped:
 			skipped = true
 		}
-		if ended != outcomeClean {
+		if ended != outcomeClean && speak {
 			reports = append(reports, result{path: repoPath, report: buf.String()})
 		}
 	}
@@ -422,6 +458,7 @@ func parseArgs(argv []string) (config, []string, error) {
 	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when anything is found, as git diff does")
 	flags.StringVar(&cfg.identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
 	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs (apply only)")
+	flags.BoolVar(&cfg.quiet, "quiet", false, "print nothing unless a repository found something, for a scheduled run")
 	flags.BoolVar(&cfg.verbose, "verbose", false, "report every commit rather than a summary")
 	flags.Usage = func() {
 		_, _ = fmt.Fprint(flags.Output(), usage)
@@ -438,6 +475,8 @@ func parseArgs(argv []string) (config, []string, error) {
 		return cfg, nil, fmt.Errorf("--base belongs to scan and apply, which are the commands that walk the history")
 	case cfg.exitCode && !cfg.scanning():
 		return cfg, nil, fmt.Errorf("--exit-code belongs to scan and apply, which are the commands that look for attributions")
+	case cfg.quiet && !cfg.scanning():
+		return cfg, nil, fmt.Errorf("--quiet belongs to scan and apply; what backups and restore print is the whole point of running them")
 	}
 	return cfg, flags.Args(), nil
 }
