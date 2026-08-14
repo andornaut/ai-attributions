@@ -68,9 +68,10 @@ usage: ai-attributions [command] [flags] [repo-path...]
 
 AI attributions in commits are ads, remove them!
 
-Reports the AI attributions in a repository's history. Nothing is rewritten
-unless the apply command asks for it. repo-path defaults to the current
-directory; more than one path runs each in turn and summarizes them.
+Reports the AI attributions in a repository's history, and the agent
+instruction files its refs carry. Nothing is rewritten unless the apply command
+asks for it. repo-path defaults to the current directory; more than one path
+runs each in turn and summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -81,7 +82,7 @@ commands:
 
 exit status:
   0  nothing found
-  1  attributions found, with --exit-code
+  1  attributions or instruction files found, with --exit-code
   2  the run could not complete
   3  nothing was examined, a fork for instance, with --exit-code
 
@@ -95,7 +96,7 @@ flags:
   -exclude glob
     	skip refs matching this glob (repeatable)
   -exit-code
-    	exit 1 when attributions are found, as git diff does
+    	exit 1 when anything is found, as git diff does
   -identity identity
     	identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
   -push
@@ -187,6 +188,8 @@ Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of 
 The tip of every ref in scope is checked for the files an agent reads its instructions from. These configure the tools a contributor happens to run rather than describe the project, so a repository that ships one hands its prompts to everyone who clones it.
 
 Unlike an emdash, this needs no flag and counts toward `--exit-code`. An instruction file is not cosmetic, and no rewrite this tool makes takes it back out, so a run that stayed quiet about it would leave the one thing it found to be noticed by hand.
+
+`--base` does not narrow this the way it narrows the commit walk. A base bounds the history a branch answers for; the tip of that branch ships what it ships, whichever commit put it there.
 
 ```
 agent instruction files, counted by the refs in scope that carry them
