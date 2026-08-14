@@ -83,6 +83,40 @@ func TestNoAgentFilesIsClean(t *testing.T) {
 	}
 }
 
+// The instruction files are looked for only where --agents-files asks for them.
+// A run that was not asked says nothing about them and finds nothing, rather
+// than failing a build over a file it was not pointed at.
+func TestAgentFilesAreReportedOnlyWhenAskedFor(t *testing.T) {
+	repo, git := gitRepo(t)
+	stage(t, repo, git, "Add the project", "AGENTS.md", "README.md")
+
+	quiet := captureReport(t, func() {
+		ended, err := runRepo(config{command: "scan"}, "", repo.Dir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ended != outcomeClean {
+			t.Errorf("outcome is %v, want %v", ended, outcomeClean)
+		}
+	})
+	if strings.Contains(quiet, "AGENTS.md") {
+		t.Errorf("a scan that was not asked reported an instruction file:\n%s", quiet)
+	}
+
+	asked := captureReport(t, func() {
+		ended, err := runRepo(config{command: "scan", agentsFiles: true}, "", repo.Dir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ended != outcomeFound {
+			t.Errorf("outcome is %v, want %v", ended, outcomeFound)
+		}
+	})
+	if !strings.Contains(asked, "AGENTS.md") {
+		t.Errorf("--agents-files did not report the instruction file:\n%s", asked)
+	}
+}
+
 func TestAgentFilesReportCountsRefsAndNamesTheFix(t *testing.T) {
 	found := agentFiles{
 		"AGENTS.md":     {"refs/heads/main", "refs/tags/v1.0.0"},

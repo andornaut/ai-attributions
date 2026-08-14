@@ -34,6 +34,21 @@ inputs:
       reporting off, which lets a commit an agent authored through the scan.
     required: false
     default: ""
+  emdashes:
+    description: >-
+      Fail the run on the emdashes in the commit messages it reads, as well as
+      on the attributions. Off by default: a typographic mark is a house style
+      rather than an ad, so a repository asks for it. apply takes them back out.
+    required: false
+    default: "false"
+  agents-files:
+    description: >-
+      Fail the run on the agent instruction files the branch carries, AGENTS.md
+      and the rest. Off by default: these configure a contributor's agent rather
+      than the project, so a repository asks before a build fails over one. They
+      are reported and never removed, since no rewrite here touches a tree.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -165,6 +180,8 @@ runs:
       shell: bash
       env:
         INPUT_IDENTITY: ${{ inputs.identity }}
+        INPUT_EMDASHES: ${{ inputs.emdashes }}
+        INPUT_AGENTS_FILES: ${{ inputs.agents-files }}
       run: |
         set -uo pipefail
         # The runner starts this shell with errexit, which would end the step
@@ -180,6 +197,21 @@ runs:
         if [ -n "$AI_ATTRIBUTIONS_BASE" ]; then
           set -- "$@" --base "$AI_ATTRIBUTIONS_BASE"
         fi
+
+        # Anything but true or false is refused rather than read as false: a
+        # typo would otherwise turn off the check the workflow asked for and
+        # report a pass nobody looked for. Both flags reach the binary only when
+        # the version installed above has them.
+        case "$INPUT_EMDASHES" in
+          true) set -- "$@" --emdashes ;;
+          false | "") ;;
+          *) echo "::error::emdashes: expected true or false, got $INPUT_EMDASHES"; exit 1 ;;
+        esac
+        case "$INPUT_AGENTS_FILES" in
+          true) set -- "$@" --agents-files ;;
+          false | "") ;;
+          *) echo "::error::agents-files: expected true or false, got $INPUT_AGENTS_FILES"; exit 1 ;;
+        esac
 
         # A runner has no git identity, and a scan that cannot name one says so
         # on every run. Whoever pushed is the answer to "re-attributed to whom".
@@ -220,14 +252,29 @@ runs:
           scope="The whole history of this branch is in scope, so every commit from the earliest
         change onward gets a new hash."
         fi
+        # The same flag the scan ran with, so the command offered here takes out
+        # everything the report above listed.
+        if [ "$INPUT_EMDASHES" = true ]; then
+          fix="$fix --emdashes"
+        fi
+
+        # An instruction file is in a tree rather than in a message, so no apply
+        # takes one out. Said here because the paragraph below is about commits.
+        files=""
+        if [ "$INPUT_AGENTS_FILES" = true ]; then
+          files="
+
+        Agent instruction files, where the report above lists any, are not rewritten:
+        take them out with the git rm commands it prints and commit that."
+        fi
 
         guidance=$(
           cat <<MESSAGE
 
-        The commits listed above carry AI attributions, which this repository does not
-        keep in its history. Rewrite $AI_ATTRIBUTIONS_BRANCH to remove them, then force push it.
+        The report above lists what this repository does not keep in its history.
+        Rewrite $AI_ATTRIBUTIONS_BRANCH to remove it, then force push it.
 
-        $scope
+        $scope$files
 
             go install github.com/andornaut/ai-attributions@latest
             $fix
@@ -235,8 +282,8 @@ runs:
 
         apply needs git-filter-repo on PATH. Editing the messages instead works just as
         well: run $rebase, reword each commit named
-        above to drop the trailers and footers, and reset the author on the commits an
-        agent signed with git commit --amend --reset-author.
+        above to drop the lines the report listed, and reset the author on the commits
+        an agent signed with git commit --amend --reset-author.
         MESSAGE
         )
         echo "$guidance"
@@ -247,5 +294,5 @@ runs:
           echo "$guidance"
           echo '```'
         } >>"$GITHUB_STEP_SUMMARY"
-        echo "::error title=AI attributions in the commit history::Rewrite $AI_ATTRIBUTIONS_BRANCH to remove them and force push it; the job log lists the commits and the commands"
+        echo "::error title=AI attributions found::Take them off $AI_ATTRIBUTIONS_BRANCH and force push it; the job log lists what was found and the commands that fix it"
         exit 1

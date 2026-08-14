@@ -20,13 +20,14 @@ type findings struct {
 	emdashes   int
 	commits    int
 	skipped    int
-	// flagged counts commits carrying an attribution, which is not the same as
+	// flagged counts commits carrying a finding, which is not the same as
 	// len(changes): an agent identity with nowhere to move to is reported and
 	// counted, but produces no change.
 	flagged int
-	// emdashesLeft counts commits whose only finding is an emdash, which is not
-	// enough on its own to move a commit.
-	emdashesLeft int
+	// emdashesAsked records whether --emdashes put emdashes in scope, which is
+	// what the counts have to name themselves after: the same tally answers a
+	// different question with the flag on.
+	emdashesAsked bool
 }
 
 // detail is one commit's findings, kept for -verbose.
@@ -40,10 +41,11 @@ type detail struct {
 // inspect works out what each commit needs, without changing anything.
 func inspect(opts clean.Options, who identity, commits []gitexec.Commit) findings {
 	found := findings{
-		changes:    map[string]rewrite.Change{},
-		removed:    map[string]int{},
-		identities: map[string]int{},
-		commits:    len(commits),
+		changes:       map[string]rewrite.Change{},
+		removed:       map[string]int{},
+		identities:    map[string]int{},
+		commits:       len(commits),
+		emdashesAsked: opts.Emdashes,
 	}
 
 	for _, commit := range commits {
@@ -62,8 +64,9 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			found.skipped++
 		}
 
-		// A trailer is what moves a commit. Emdashes are counted separately,
-		// below, because they ride along rather than decide anything.
+		// A trailer moves a commit whatever else the message carries. Emdashes
+		// are taken separately, below, because they are only there to be taken
+		// where --emdashes asked.
 		if len(got.RemovedLines) > 0 {
 			flagged = true
 			item.removedLines = got.RemovedLines
@@ -94,16 +97,18 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			}
 		}
 
-		// An emdash is never a reason to rewrite a commit. It is cleaned up only
-		// on a commit that an attribution is already moving, so that the number
-		// of commits changing hash is decided by attributions alone.
-		switch {
-		case flagged && !got.Empty():
+		// An emdash is a reason to rewrite a commit only where --emdashes asked
+		// for one: a message carries no changed lines otherwise. Asking makes it
+		// a finding of its own rather than a tidy-up riding along on a commit an
+		// attribution already moves, so a scan can fail on an emdash and the
+		// apply it names is what takes the emdash back out.
+		if len(got.ChangedLines) > 0 {
+			flagged = true
+		}
+		if flagged && !got.Empty() {
 			change.Message = message
 			item.changedLines = got.ChangedLines
 			found.emdashes += len(got.ChangedLines)
-		case !flagged && len(got.ChangedLines) > 0:
-			found.emdashesLeft++
 		}
 
 		if change != (rewrite.Change{}) {
@@ -128,8 +133,7 @@ func mapping(field, name, address string, who identity) string {
 // scope names the history the counts answer for.
 func (f findings) report(verbose bool, scope string) {
 	if f.flagged == 0 {
-		say("no AI attributions in %d commits, across %s\n", f.commits, scope)
-		f.reportEmdashesLeft()
+		say("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
 		f.reportSkipped()
 		return
 	}
@@ -150,13 +154,12 @@ func (f findings) report(verbose bool, scope string) {
 		say("\n")
 	}
 
-	say("%d of %d commits carry AI attributions, across %s\n", f.flagged, f.commits, scope)
+	say("%d of %d commits carry %s, across %s\n", f.flagged, f.commits, subject(f.emdashesAsked), scope)
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		say("\nemdash rewrites, on commits an attribution is already moving\n%6d  lines\n", f.emdashes)
+		say("\nemdash rewrites\n%6d  lines\n", f.emdashes)
 	}
-	f.reportEmdashesLeft()
 	f.reportSkipped()
 	if !verbose {
 		say("\npass --verbose to list the commits behind these counts\n")
@@ -173,16 +176,14 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	}
 }
 
-func (f findings) reportEmdashesLeft() {
-	switch f.emdashesLeft {
-	case 0:
-		return
-	case 1:
-		say("\n1 commit carries an emdash and no attribution, so it is left alone;\n")
-	default:
-		say("\n%d commits carry an emdash and no attribution, so they are left alone;\n", f.emdashesLeft)
+// subject names what a count is counting. --emdashes widens it: an emdash is a
+// finding in its own right once it is asked for, so a report that went on
+// saying "AI attributions" would be naming a cause the counts no longer have.
+func subject(emdashes bool) string {
+	if emdashes {
+		return "AI attributions or emdashes"
 	}
-	say("rewriting for a typographic fix would move commits that nothing else moves\n")
+	return "AI attributions"
 }
 
 func (f findings) reportSkipped() {
@@ -221,9 +222,9 @@ func inspectAgentFiles(repo *gitexec.Repo, refs []string) (agentFiles, error) {
 }
 
 // outcome is how a run with nothing to rewrite ended. A committed instruction
-// file is a finding in its own right, unlike an emdash: it is not cosmetic, and
-// no rewrite this tool makes takes it back out, so a run that stayed quiet
-// about it would leave the one thing it found to be noticed by hand.
+// file --agents-files asked about is a finding in its own right: no rewrite
+// this tool makes takes it back out, so a run that stayed quiet about it would
+// leave the one thing it found to be noticed by hand.
 func (a agentFiles) outcome() outcome {
 	if len(a) > 0 {
 		return outcomeFound
@@ -372,7 +373,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		return nil
 	}
 
-	say("\nnot in scope, and not counted above: remote branches carrying attributions\n")
+	say("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
 	for _, line := range lines {
 		say("%s\n", line)
 	}

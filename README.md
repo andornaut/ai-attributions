@@ -5,11 +5,11 @@
 
 AI attributions in commits are ads, remove them!
 
-Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the agent identities on the commits themselves, and the emdashes on those same commits.
+Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the agent identities on the commits themselves. `--emdashes` adds the emdashes on those commits, and `--agents-files` adds the instruction files a ref ships.
 
 ```console
-$ ai-attributions ~/src/example
-2 of 5 commits carry AI attributions, across refs/heads/main
+$ ai-attributions --emdashes ~/src/example
+2 of 5 commits carry AI attributions or emdashes, across refs/heads/main
 
 removed lines
      2  Co-Authored-By: Claude <noreply@anthropic.com>
@@ -18,7 +18,7 @@ removed lines
 identities
      1  author Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
 
-emdash rewrites, on commits an attribution is already moving
+emdash rewrites
      2  lines
 
 pass --verbose to list the commits behind these counts
@@ -33,8 +33,8 @@ nothing was rewritten. Run apply to rewrite the history
 - [Scanning](#scanning) is the default - nothing is rewritten unless `apply` asks for it
 - [Trailers and footers](#trailers-and-footers) that name an agent are dropped, and human co-authors are kept
 - [Identities](#identities) - agent-authored commits are re-attributed, which is what GitHub's contributor list reads
-- [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then only on commits an attribution already moves
-- [Agent instruction files](#agent-instruction-files) a ref ships are reported, without a flag to ask for it
+- [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then they are a finding of their own
+- [Agent instruction files](#agent-instruction-files) a ref ships are reported where `--agents-files` asks for them
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
 - [Several repositories](#sweeping-several-repositories) in one run, summarized a line each
 - [`--exit-code`](#catching-them-before-they-land) exits 1 when anything is found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
@@ -68,10 +68,10 @@ usage: ai-attributions [command] [flags] [repo-path...]
 
 AI attributions in commits are ads, remove them!
 
-Reports the AI attributions in a repository's history, and the agent
-instruction files its refs carry. Nothing is rewritten unless the apply command
-asks for it. repo-path defaults to the current directory; more than one path
-runs each in turn and summarizes them.
+Reports the AI attributions in a repository's history, and, where the flags for
+them ask, its emdashes and the agent instruction files its refs carry. Nothing
+is rewritten unless the apply command asks for it. repo-path defaults to the
+current directory; more than one path runs each in turn and summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -82,17 +82,20 @@ commands:
 
 exit status:
   0  nothing found
-  1  attributions or instruction files found, with --exit-code
+  1  attributions, or the emdashes and instruction files the flags for them
+     put in scope, found with --exit-code
   2  the run could not complete
   3  nothing was examined, a fork for instance, with --exit-code
 
 flags:
+  -agents-files
+    	also report the agent instruction files the refs in scope carry
   -base ref
     	only the commits the refs in scope add over this ref
   -current-branch
     	only the branch that is checked out, not every local branch and tag
   -emdashes
-    	also rewrite emdashes, on the commits an attribution is already moving
+    	also report emdashes, and rewrite them, rather than leaving them alone
   -exclude glob
     	skip refs matching this glob (repeatable)
   -exit-code
@@ -179,15 +182,15 @@ Scanning reports agent identities without an identity configured; only `apply` r
 
 ### Emdashes
 
-Off unless `--emdashes` asks for it, and even then an emdash never moves a commit on its own: it is rewritten only on a commit an attribution is already moving, so attributions alone decide how many commits change hash. The report says how many commits were left with an emdash.
+Off unless `--emdashes` asks for it: a typographic mark is a house style rather than an ad, so attributions alone decide what a run finds by default. Asking makes an emdash a finding in its own right, counted toward `--exit-code` and rewritten wherever it appears, so a build the flag fails is a build the `apply` it names fixes. Without the flag, an emdash is not looked at.
 
 Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of them becomes one, and the spacing around them is left as it was: `the parser — which is old — broke` becomes `the parser - which is old - broke`, and `read—write` becomes `read-write`. A dash inside a URL is part of the address, so it is left alone.
 
 ### Agent instruction files
 
-The tip of every ref in scope is checked for the files an agent reads its instructions from. These configure the tools a contributor happens to run rather than describe the project, so a repository that ships one hands its prompts to everyone who clones it.
+Off unless `--agents-files` asks for it. The tip of every ref in scope is then checked for the files an agent reads its instructions from. These configure the tools a contributor happens to run rather than describe the project, so a repository that ships one hands its prompts to everyone who clones it, and a repository that would rather not says so with the flag.
 
-Unlike an emdash, this needs no flag and counts toward `--exit-code`. An instruction file is not cosmetic, and no rewrite this tool makes takes it back out, so a run that stayed quiet about it would leave the one thing it found to be noticed by hand.
+Where the flag asks, an instruction file counts toward `--exit-code` on its own. It is not cosmetic, and no rewrite this tool makes takes it back out, so a run that stayed quiet about one would leave the one thing it found to be noticed by hand.
 
 `--base` does not narrow this the way it narrows the commit walk. A base bounds the history a branch answers for; the tip of that branch ships what it ships, whichever commit put it there.
 
@@ -301,6 +304,17 @@ Input | Default | What it is
 `version` | the release the action was cut with | the release to install
 `path` | `.` | the repository to scan, relative to the workspace
 `identity` | whoever pushed, at their GitHub address | the identity the report names for an agent-authored commit
+`emdashes` | `false` | fail the run on the emdashes in the commit messages it reads
+`agents-files` | `false` | fail the run on the agent instruction files the branch carries
+
+`emdashes` and `agents-files` are off for the same reason the flags behind them are: a house style and a contributor's tooling are a repository's own call, and a scan that failed a build over either unasked would be answering a question nobody put to it. Turn one on and the failure names it like any other finding; `emdashes` also puts `--emdashes` on the `apply` the job offers, so the command it prints takes back out what it failed over. Each needs a `version` carrying the flag behind it, so a workflow that turns one on pins or moves `version` with it.
+
+```yaml
+      - uses: andornaut/ai-attributions@v1
+        with:
+          emdashes: true
+          agents-files: true
+```
 
 A base the action guessed and cannot resolve widens to the whole history with a warning; one passed as `base` fails the step, since widening would scan history that predates whatever it was pointing at. A push to the default branch has no base to measure against, its own previous tip not being in the checkout, so it reads the whole history too.
 
@@ -341,7 +355,7 @@ A carried tag is published with the rewrite rather than held back, since a tag l
 ## Limitations
 
 - Only commit messages and identities are rewritten. File contents are untouched, so an agent instruction file is reported and never removed.
-- The instruction files are a fixed list of paths, checked where they are conventionally kept. One nested somewhere else, a monorepo's per-package `AGENTS.md` for instance, is not found. There is no flag to turn the check off, so a project that ships an `AGENTS.md` deliberately has nothing to pass.
+- The instruction files are a fixed list of paths, checked where they are conventionally kept. One nested somewhere else, a monorepo's per-package `AGENTS.md` for instance, is not found even with `--agents-files`.
 - Annotated tag messages are not scanned, though the tags themselves are repointed at the rewritten commits.
 - A tag is repointed locally. Publishing that move is still a force push, which changes what a release built from the tag is built from.
 - Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported.

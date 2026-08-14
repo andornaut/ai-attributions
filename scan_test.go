@@ -29,10 +29,10 @@ func commit(c gitexec.Commit, hash, message string) gitexec.Commit {
 	return c
 }
 
-// An emdash never moves a commit on its own. It is cleaned up only where an
-// attribution is already moving the commit, so the number of commits changing
-// hash is decided by attributions alone.
-func TestEmdashesRideAlongOnly(t *testing.T) {
+// An emdash is a finding only where --emdashes asks for one, and then it moves
+// a commit of its own accord: what a scan reports is what an apply takes back
+// out. Without the flag, an emdash is not looked at.
+func TestEmdashesAreFoundOnlyWhenAskedFor(t *testing.T) {
 	tests := []struct {
 		name        string
 		opts        clean.Options
@@ -42,10 +42,18 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "emdash alone does not move a commit",
+			name:        "emdash alone moves a commit",
 			opts:        all,
 			who:         who,
 			commit:      commit(person, "a1", "tidy the parser — it was unreadable\n"),
+			wantFlagged: 1,
+			wantMessage: "tidy the parser - it was unreadable\n",
+		},
+		{
+			name:        "emdash alone is left alone without --emdashes",
+			opts:        clean.Options{Trailers: true},
+			who:         who,
+			commit:      commit(person, "a0", "tidy the parser — it was unreadable\n"),
 			wantFlagged: 0,
 		},
 		{
@@ -65,11 +73,12 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 			wantMessage: "tidy the parser - it was unreadable\n",
 		},
 		{
-			name:        "emdash is left alone when identity rewriting is off",
+			name:        "emdash is still found when identity rewriting is off",
 			opts:        all,
 			who:         identity{},
 			commit:      commit(agent, "a4", "tidy the parser — it was unreadable\n"),
-			wantFlagged: 0,
+			wantFlagged: 1,
+			wantMessage: "tidy the parser - it was unreadable\n",
 		},
 		{
 			name:        "trailer alone still moves a commit",
@@ -109,9 +118,9 @@ func TestEmdashesRideAlongOnly(t *testing.T) {
 	}
 }
 
-// A commit left alone for having only an emdash is still counted, so that the
-// report can say it was a decision.
-func TestEmdashesLeftAreCounted(t *testing.T) {
+// A commit whose only finding is an emdash is rewritten like any other, so a
+// build that --emdashes failed has an apply that fixes it.
+func TestEmdashOnlyCommitsAreRewritten(t *testing.T) {
 	commits := []gitexec.Commit{
 		commit(person, "b1", "tidy the parser — it was unreadable\n"),
 		commit(person, "b2", "rename the field — it was misleading\n"),
@@ -119,11 +128,44 @@ func TestEmdashesLeftAreCounted(t *testing.T) {
 	}
 
 	found := inspect(all, who, commits)
-	if found.emdashesLeft != 2 {
-		t.Errorf("emdashesLeft = %d, want 2", found.emdashesLeft)
+	if found.flagged != 2 {
+		t.Errorf("flagged = %d, want 2", found.flagged)
 	}
-	if found.flagged != 0 {
-		t.Errorf("flagged = %d, want 0", found.flagged)
+	if len(found.changes) != 2 {
+		t.Errorf("changes = %v, want the two commits carrying an emdash", found.changes)
+	}
+	if found.emdashes != 2 {
+		t.Errorf("emdashes = %d, want 2", found.emdashes)
+	}
+
+	// The same commits without the flag: nothing looked at is nothing found.
+	quiet := inspect(clean.Options{Trailers: true}, who, commits)
+	if quiet.flagged != 0 {
+		t.Errorf("flagged = %d without --emdashes, want 0", quiet.flagged)
+	}
+	if len(quiet.changes) != 0 {
+		t.Errorf("changes = %v without --emdashes, want none", quiet.changes)
+	}
+}
+
+// The counts name what put a commit in them, so a report cannot credit an
+// emdash to an attribution that is not there.
+func TestReportNamesEmdashesOnlyWhenAskedFor(t *testing.T) {
+	commits := []gitexec.Commit{commit(person, "e1", "tidy the parser — it was unreadable\n")}
+
+	report := captureReport(t, func() { inspect(all, who, commits).report(false, "refs/heads/main") })
+	if !strings.Contains(report, "1 of 1 commits carry AI attributions or emdashes") {
+		t.Errorf("report did not count the emdash as a finding:\n%s", report)
+	}
+	if !strings.Contains(report, "emdash rewrites\n     1  lines") {
+		t.Errorf("report did not tally the emdash rewrite:\n%s", report)
+	}
+
+	quiet := captureReport(t, func() {
+		inspect(clean.Options{Trailers: true}, who, commits).report(false, "refs/heads/main")
+	})
+	if !strings.Contains(quiet, "no AI attributions in 1 commits") {
+		t.Errorf("report named emdashes without --emdashes:\n%s", quiet)
 	}
 }
 

@@ -49,3 +49,9 @@ jobs:
           # repository is where that default gets bumped, and a bump names a
           # release that is published after the commit making it.
           version: dev
+          # This repository holds itself to both, so its own history is what the
+          # action asks other repositories for. Each needs a binary carrying the
+          # flag behind it, and dev is re-cut from main: a branch that adds one
+          # of these flags scans red until the change it makes lands.
+          emdashes: true
+          agents-files: true

@@ -1,9 +1,10 @@
 // Command ai-attributions removes AI attributions from a repository's git
 // history: co-author and session trailers, "generated with" footers, and the
-// agent identities on the commits themselves. --emdashes adds the emdashes
-// that ride along on those same commits. It also reports the agent instruction
-// files the refs in scope carry, which are found rather than removed: they are
-// files in a tree, and the rewrite replaces messages and identities.
+// agent identities on the commits themselves. --emdashes adds the emdashes on
+// those commits, and --agents-files adds the agent instruction files the refs
+// in scope carry, which are found rather than removed: they are files in a
+// tree, and the rewrite replaces messages and identities. Both are off unless
+// asked for, so what a run reports is what it was pointed at.
 package main
 
 import (
@@ -29,10 +30,10 @@ const usage = `usage: ai-attributions [command] [flags] [repo-path...]
 
 AI attributions in commits are ads, remove them!
 
-Reports the AI attributions in a repository's history, and the agent
-instruction files its refs carry. Nothing is rewritten unless the apply command
-asks for it. repo-path defaults to the current directory; more than one path
-runs each in turn and summarizes them.
+Reports the AI attributions in a repository's history, and, where the flags for
+them ask, its emdashes and the agent instruction files its refs carry. Nothing
+is rewritten unless the apply command asks for it. repo-path defaults to the
+current directory; more than one path runs each in turn and summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -43,7 +44,8 @@ commands:
 
 exit status:
   0  nothing found
-  1  attributions or instruction files found, with --exit-code
+  1  attributions, or the emdashes and instruction files the flags for them
+     put in scope, found with --exit-code
   2  the run could not complete
   3  nothing was examined, a fork for instance, with --exit-code
 
@@ -164,7 +166,12 @@ var commands = map[string]bool{
 
 type config struct {
 	command string
-	base    string
+	// agentsFiles asks for the instruction files the refs in scope carry. Off
+	// by default, as --emdashes is: an agent instruction file is a contributor's
+	// business until a repository says otherwise, and a scan that reported one
+	// unasked would fail a build over a file no rewrite here takes back out.
+	agentsFiles bool
+	base        string
 	// currentBranch narrows the run to the branch that is checked out. The
 	// default is every local branch and tag, "is this repository clean" being
 	// the question the tool answers.
@@ -406,9 +413,10 @@ func parseArgs(argv []string) (config, []string, error) {
 	}
 
 	flags := flag.NewFlagSet("ai-attributions", flag.ExitOnError)
+	flags.BoolVar(&cfg.agentsFiles, "agents-files", false, "also report the agent instruction files the refs in scope carry")
 	flags.StringVar(&cfg.base, "base", "", "only the commits the refs in scope add over this `ref`")
 	flags.BoolVar(&cfg.currentBranch, "current-branch", false, "only the branch that is checked out, not every local branch and tag")
-	flags.BoolVar(&cfg.emdashes, "emdashes", false, "also rewrite emdashes, on the commits an attribution is already moving")
+	flags.BoolVar(&cfg.emdashes, "emdashes", false, "also report emdashes, and rewrite them, rather than leaving them alone")
 	flags.Var(&cfg.exclude, "exclude", "skip refs matching this `glob` (repeatable)")
 	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when anything is found, as git diff does")
 	flags.StringVar(&cfg.identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
@@ -452,9 +460,14 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	// A question about the trees at the tips, so it is asked of the refs
 	// themselves rather than of the commits in range: a base that narrows the
 	// history to one pull request narrows nothing about what the branch ships.
-	agents, err := inspectAgentFiles(repo, refs)
-	if err != nil {
-		return outcomeClean, err
+	// Asked only where --agents-files asks for it, and a run that never looked
+	// reports nothing and finds nothing, which an empty set already says.
+	var agents agentFiles
+	if cfg.agentsFiles {
+		agents, err = inspectAgentFiles(repo, refs)
+		if err != nil {
+			return outcomeClean, err
+		}
 	}
 
 	commits, err := commitsInScope(repo, cfg, refs)
@@ -472,8 +485,9 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 		reportNothingToRewrite(cfg)
 		return agents.outcome(), nil
 	}
-	// Trailers are the point of the tool. Emdashes are asked for: they move no
-	// commit by themselves, so leaving them costs nothing.
+	// Trailers are the point of the tool. Emdashes are asked for, and asking is
+	// what makes one a finding: a run that reports an emdash rewrites it too, so
+	// what fails a build is what apply takes back out.
 	opts := clean.Options{Trailers: true, Emdashes: cfg.emdashes}
 
 	found := inspect(opts, who, commits)
