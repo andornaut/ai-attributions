@@ -1,7 +1,9 @@
 // Command ai-attributions removes AI attributions from a repository's git
 // history: co-author and session trailers, "generated with" footers, and the
 // agent identities on the commits themselves. --emdashes adds the emdashes
-// that ride along on those same commits.
+// that ride along on those same commits. It also reports the agent instruction
+// files the refs in scope carry, which are found rather than removed: they are
+// files in a tree, and the rewrite replaces messages and identities.
 package main
 
 import (
@@ -27,9 +29,10 @@ const usage = `usage: ai-attributions [command] [flags] [repo-path...]
 
 AI attributions in commits are ads, remove them!
 
-Reports the AI attributions in a repository's history. Nothing is rewritten
-unless the apply command asks for it. repo-path defaults to the current
-directory; more than one path runs each in turn and summarizes them.
+Reports the AI attributions in a repository's history, and the agent
+instruction files its refs carry. Nothing is rewritten unless the apply command
+asks for it. repo-path defaults to the current directory; more than one path
+runs each in turn and summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -40,7 +43,7 @@ commands:
 
 exit status:
   0  nothing found
-  1  attributions found, with --exit-code
+  1  attributions or instruction files found, with --exit-code
   2  the run could not complete
   3  nothing was examined, a fork for instance, with --exit-code
 
@@ -407,7 +410,7 @@ func parseArgs(argv []string) (config, []string, error) {
 	flags.BoolVar(&cfg.currentBranch, "current-branch", false, "only the branch that is checked out, not every local branch and tag")
 	flags.BoolVar(&cfg.emdashes, "emdashes", false, "also rewrite emdashes, on the commits an attribution is already moving")
 	flags.Var(&cfg.exclude, "exclude", "skip refs matching this `glob` (repeatable)")
-	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when attributions are found, as git diff does")
+	flags.BoolVar(&cfg.exitCode, "exit-code", false, "exit 1 when anything is found, as git diff does")
 	flags.StringVar(&cfg.identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
 	flags.BoolVar(&cfg.push, "push", false, "force push the rewritten refs (apply only)")
 	flags.BoolVar(&cfg.verbose, "verbose", false, "report every commit rather than a summary")
@@ -446,6 +449,14 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	if err != nil {
 		return outcomeClean, err
 	}
+	// A question about the trees at the tips, so it is asked of the refs
+	// themselves rather than of the commits in range: a base that narrows the
+	// history to one pull request narrows nothing about what the branch ships.
+	agents, err := inspectAgentFiles(repo, refs)
+	if err != nil {
+		return outcomeClean, err
+	}
+
 	commits, err := commitsInScope(repo, cfg, refs)
 	if err != nil {
 		return outcomeClean, err
@@ -457,8 +468,9 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 			say("no commits to inspect: %s adds nothing over %s\n",
 				strings.Join(refs, ", "), cfg.base)
 		}
+		agents.report(cfg.verbose)
 		reportNothingToRewrite(cfg)
-		return outcomeClean, nil
+		return agents.outcome(), nil
 	}
 	// Trailers are the point of the tool. Emdashes are asked for: they move no
 	// commit by themselves, so leaving them costs nothing.
@@ -466,6 +478,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 
 	found := inspect(opts, who, commits)
 	found.report(cfg.verbose, scopeLabel(cfg, refs))
+	agents.report(cfg.verbose)
 	moved, err := found.reportRadius(repo, cfg, refs)
 	if err != nil {
 		return outcomeClean, err
@@ -485,7 +498,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 
 	if found.flagged == 0 {
 		reportNothingToRewrite(cfg)
-		return outcomeClean, nil
+		return agents.outcome(), nil
 	}
 	if !cfg.applying() {
 		if len(found.changes) > 0 {

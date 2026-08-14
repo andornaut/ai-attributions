@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 
@@ -16,6 +17,11 @@ func gitRepo(t *testing.T) (*gitexec.Repo, func(args ...string)) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+		// Whoever runs the suite has git configuration of their own, and an
+		// ignore file naming the instruction files these tests stage is the
+		// configuration a contributor to this repository is most likely to
+		// have. The fixtures answer for what the tests put in them.
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}

@@ -34,9 +34,10 @@ nothing was rewritten. Run apply to rewrite the history
 - [Trailers and footers](#trailers-and-footers) that name an agent are dropped, and human co-authors are kept
 - [Identities](#identities) - agent-authored commits are re-attributed, which is what GitHub's contributor list reads
 - [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then only on commits an attribution already moves
+- [Agent instruction files](#agent-instruction-files) a ref ships are reported, without a flag to ask for it
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
 - [Several repositories](#sweeping-several-repositories) in one run, summarized a line each
-- [`--exit-code`](#catching-them-before-they-land) exits 1 when attributions are found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
+- [`--exit-code`](#catching-them-before-they-land) exits 1 when anything is found, for CI and pre-push hooks, and a [GitHub Action](#github-action) that fails a branch carrying them
 - [Backups](#backups) - the pre-rewrite refs are saved, and `restore` puts one run back
 
 ## Installation
@@ -181,6 +182,25 @@ Off unless `--emdashes` asks for it, and even then an emdash never moves a commi
 
 Emdashes, endashes, figure dashes and horizontal bars become a hyphen, a run of them becomes one, and the spacing around them is left as it was: `the parser — which is old — broke` becomes `the parser - which is old - broke`, and `read—write` becomes `read-write`. A dash inside a URL is part of the address, so it is left alone.
 
+### Agent instruction files
+
+The tip of every ref in scope is checked for the files an agent reads its instructions from. These configure the tools a contributor happens to run rather than describe the project, so a repository that ships one hands its prompts to everyone who clones it.
+
+Unlike an emdash, this needs no flag and counts toward `--exit-code`. An instruction file is not cosmetic, and no rewrite this tool makes takes it back out, so a run that stayed quiet about it would leave the one thing it found to be noticed by hand.
+
+```
+agent instruction files, counted by the refs in scope that carry them
+     3  .cursor/rules
+     3  AGENTS.md
+     2  CLAUDE.md
+```
+
+The paths checked are `.aider.conf.yml`, `.clinerules`, `.cursor/rules`, `.cursorrules`, `.github/copilot-instructions.md`, `.junie/guidelines.md`, `.roorules`, `.windsurfrules`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `QWEN.md`. A directory is reported as the directory, not as each file under it.
+
+Each is looked up at a ref rather than searched for, so the check costs a descent to a known path per ref rather than a walk of every tree in scope: a repository with a thousand tags does not pay for its whole history to answer a question about its tips.
+
+Nothing here is rewritten. `git rm -r --cached <path>` takes one out of the branch that carries it, and the report prints that command for each path it found. Every other ref keeps its copy, and so does the history.
+
 ### Refs in scope
 
 `scan` and `apply` cover the same refs: every local branch and tag, or the branch that is checked out under `--current-branch`, minus anything `--exclude` matches. Covering the whole repository is the default because "is this repository clean" is the question the tool answers; `--current-branch` is for a caller asking about one branch, such as a CI job answering for what a push added. `--exclude` takes a glob, is repeatable, and matches the full ref or its short name, so `--exclude dev` covers `refs/tags/dev` and `--exclude agent-work` covers `refs/remotes/origin/agent-work`.
@@ -317,7 +337,8 @@ A carried tag is published with the rewrite rather than held back, since a tag l
 
 ## Limitations
 
-- Only commit messages and identities are rewritten. File contents are untouched.
+- Only commit messages and identities are rewritten. File contents are untouched, so an agent instruction file is reported and never removed.
+- The instruction files are a fixed list of paths, checked where they are conventionally kept. One nested somewhere else, a monorepo's per-package `AGENTS.md` for instance, is not found. There is no flag to turn the check off, so a project that ships an `AGENTS.md` deliberately has nothing to pass.
 - Annotated tag messages are not scanned, though the tags themselves are repointed at the rewritten commits.
 - A tag is repointed locally. Publishing that move is still a force push, which changes what a release built from the tag is built from.
 - Remote-only branches are reported, never rewritten. Commits reachable only from a stash are not reported.

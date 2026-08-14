@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -189,6 +191,75 @@ func (f findings) reportSkipped() {
 		say("\n1 commit message was skipped because it is not valid UTF-8\n")
 	case f.skipped > 1:
 		say("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
+	}
+}
+
+// agentFiles are the instruction files the refs in scope carry, as a path to
+// the refs holding it. Keyed by path rather than by ref, because the same file
+// on twenty tags is one file to take out, not twenty findings.
+type agentFiles map[string][]string
+
+// inspectAgentFiles looks for an agent's instruction files at the tip of every
+// ref in scope. Nothing here is ever rewritten: these are files in a tree, and
+// the rewrite replaces messages and identities.
+func inspectAgentFiles(repo *gitexec.Repo, refs []string) (agentFiles, error) {
+	byRef, err := repo.PathsAtRefs(refs, clean.AgentFiles())
+	if err != nil {
+		return nil, err
+	}
+
+	found := agentFiles{}
+	for ref, paths := range byRef {
+		for _, path := range paths {
+			found[path] = append(found[path], ref)
+		}
+	}
+	for _, refs := range found {
+		slices.Sort(refs)
+	}
+	return found, nil
+}
+
+// outcome is how a run with nothing to rewrite ended. A committed instruction
+// file is a finding in its own right, unlike an emdash: it is not cosmetic, and
+// no rewrite this tool makes takes it back out, so a run that stayed quiet
+// about it would leave the one thing it found to be noticed by hand.
+func (a agentFiles) outcome() outcome {
+	if len(a) > 0 {
+		return outcomeFound
+	}
+	return outcomeClean
+}
+
+// report names the instruction files, the refs carrying them, and how to take
+// one out.
+func (a agentFiles) report(verbose bool) {
+	if len(a) == 0 {
+		return
+	}
+	paths := slices.Sorted(maps.Keys(a))
+
+	say("\nagent instruction files, counted by the refs in scope that carry them\n")
+	for _, path := range paths {
+		say("%6d  %s\n", len(a[path]), path)
+		if verbose {
+			for _, ref := range a[path] {
+				say("        %s\n", ref)
+			}
+		}
+	}
+
+	say("\nthese configure a contributor's agent rather than the project, so they\n")
+	say("belong in a global ignore file. Take one out of the branch that carries it:\n")
+	for _, path := range paths {
+		say("  git rm -r --cached %s\n", path)
+	}
+	// Said plainly, because the counts above name tags as readily as branches
+	// and the command above cannot do anything about a tag.
+	say("\nevery other ref keeps its copy, and so does the history: this tool\n")
+	say("rewrites messages and identities, never trees\n")
+	if !verbose {
+		say("\npass --verbose to list the refs behind these counts\n")
 	}
 }
 

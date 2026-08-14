@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,70 @@ func (r *Repo) output(args ...string) (string, int, error) {
 		return "", status, fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
 	}
 	return stdout.String(), 0, nil
+}
+
+// outputWithInput runs git with stdin attached, for a command that reads what
+// to work on rather than taking it as arguments.
+func (r *Repo) outputWithInput(stdin io.Reader, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.dir
+	cmd.Stdin = stdin
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+	}
+	return stdout.String(), nil
+}
+
+// PathsAtRefs reports which of paths each of refs carries, as a map holding
+// only the refs that carry one. A path naming a directory is reported as it was
+// given rather than expanded to the files under it.
+//
+// One git process answers every combination, and each answer costs a descent to
+// a known path rather than a walk of the tree it is in. A repository with a
+// thousand tags is what this is for: listing every tree to find a file at a
+// known path makes a question about the tips cost as much as the history.
+func (r *Repo) PathsAtRefs(refs, paths []string) (map[string][]string, error) {
+	if len(refs) == 0 || len(paths) == 0 {
+		return nil, nil
+	}
+
+	var stdin bytes.Buffer
+	for _, ref := range refs {
+		for _, path := range paths {
+			// git reads "<ref>:<path>" and hands back whatever followed the
+			// first space as %(rest), which is how a hit names the pair that
+			// produced it rather than being matched up by position. A refname
+			// can hold neither a space nor a colon, and none of the paths hold
+			// a space, so the split is unambiguous.
+			fmt.Fprintf(&stdin, "%s:%s %s %s\n", ref, path, ref, path)
+		}
+	}
+
+	out, err := r.outputWithInput(&stdin, "cat-file", "--batch-check=%(objecttype) %(rest)", "--buffer")
+	if err != nil {
+		return nil, err
+	}
+
+	found := map[string][]string{}
+	for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
+		// A pair that does not exist reports as "<ref>:<path> missing", which
+		// carries no %(rest) to be read back, so a line that is not three
+		// fields is one that found nothing.
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		ref, path := fields[1], fields[2]
+		found[ref] = append(found[ref], path)
+	}
+	return found, nil
 }
 
 func (r *Repo) CombinedOutput(args ...string) (string, error) {
