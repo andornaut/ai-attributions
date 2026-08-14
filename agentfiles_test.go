@@ -127,6 +127,9 @@ func TestAgentFilesReportCountsRefsAndNamesTheFix(t *testing.T) {
 	for _, want := range []string{
 		"     2  AGENTS.md",
 		"     1  .cursor/rules",
+		// The report carries its own verdict, since the counts above it answer
+		// for commits and can be clean while this exits 1.
+		"--exit-code exits 1",
 		"git rm -r --cached AGENTS.md",
 		"pass --verbose to list the refs behind these counts",
 	} {

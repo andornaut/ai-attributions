@@ -250,6 +250,12 @@ func (a agentFiles) report(verbose bool) {
 		}
 	}
 
+	// Said here because the report above this one answers for commits, and a
+	// run whose commits were clean would otherwise open on a clean line and
+	// close on a status nothing in the report accounted for.
+	say("\na file here is a finding of its own: --exit-code exits 1 whatever the\n")
+	say("commit walk above reported\n")
+
 	say("\nthese configure a contributor's agent rather than the project, so they\n")
 	say("belong in a global ignore file. Take one out of the branch that carries it:\n")
 	for _, path := range paths {

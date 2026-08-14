@@ -5,7 +5,7 @@
 
 AI attributions in commits are ads, remove them!
 
-Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the agent identities on the commits themselves. `--emdashes` adds the emdashes on those commits, and `--agents-files` adds the instruction files a ref ships.
+Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the agent identities on the commits themselves. `--emdashes` adds the emdashes in the messages in scope, wherever they appear, and `--agents-files` adds the instruction files a ref ships.
 
 ```console
 $ ai-attributions --emdashes ~/src/example
@@ -307,7 +307,9 @@ Input | Default | What it is
 `emdashes` | `false` | fail the run on the emdashes in the commit messages it reads
 `agents-files` | `false` | fail the run on the agent instruction files the branch carries
 
-`emdashes` and `agents-files` are off for the same reason the flags behind them are: a house style and a contributor's tooling are a repository's own call, and a scan that failed a build over either unasked would be answering a question nobody put to it. Turn one on and the failure names it like any other finding; `emdashes` also puts `--emdashes` on the `apply` the job offers, so the command it prints takes back out what it failed over. Each needs a `version` carrying the flag behind it, so a workflow that turns one on pins or moves `version` with it.
+`emdashes` and `agents-files` are off for the same reason the flags behind them are: a house style and a contributor's tooling are a repository's own call, and a scan that failed a build over either unasked would be answering a question nobody put to it. Turn one on and the failure names it like any other finding, and the `apply` the job offers is given the same flags, so the command it prints answers for what failed the build.
+
+Each needs a `version` carrying the check behind it, and the two fail differently on one that does not. `agents-files` ends the step, the binary having no such flag to parse. `emdashes` is quieter: every release has had that flag, so an older one accepts it and applies what it meant at the time, which was a tidy-up riding along on commits an attribution already moved. An emdash-only commit then passes green under an input that says it fails. A release carrying `--agents-files` is one where `--emdashes` means what this document says it means; pin or move `version` with these inputs.
 
 ```yaml
       - uses: andornaut/ai-attributions@v1

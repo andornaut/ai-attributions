@@ -39,6 +39,9 @@ inputs:
       Fail the run on the emdashes in the commit messages it reads, as well as
       on the attributions. Off by default: a typographic mark is a house style
       rather than an ad, so a repository asks for it. apply takes them back out.
+      Needs a version where an emdash is a finding of its own, which is any that
+      also has agents-files: an older release accepts the flag with the meaning
+      it had then, a tidy-up riding along, and passes an emdash-only commit.
     required: false
     default: "false"
   agents-files:
@@ -252,10 +255,13 @@ runs:
           scope="The whole history of this branch is in scope, so every commit from the earliest
         change onward gets a new hash."
         fi
-        # The same flag the scan ran with, so the command offered here takes out
-        # everything the report above listed.
+        # The flags the scan ran with, so the command offered here answers for
+        # what failed the build rather than for a narrower run.
         if [ "$INPUT_EMDASHES" = true ]; then
           fix="$fix --emdashes"
+        fi
+        if [ "$INPUT_AGENTS_FILES" = true ]; then
+          fix="$fix --agents-files"
         fi
 
         # An instruction file is in a tree rather than in a message, so no apply
@@ -272,7 +278,8 @@ runs:
           cat <<MESSAGE
 
         The report above lists what this repository does not keep in its history.
-        Rewrite $AI_ATTRIBUTIONS_BRANCH to remove it, then force push it.
+        Where it names commits, rewrite $AI_ATTRIBUTIONS_BRANCH to take them off it, then
+        force push.
 
         $scope$files
 
