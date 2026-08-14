@@ -1,5 +1,8 @@
 # ai-attributions
 
+[![CI](https://github.com/andornaut/ai-attributions/actions/workflows/test.yml/badge.svg)](https://github.com/andornaut/ai-attributions/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 AI attributions in commits are ads, remove them!
 
 Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, the agent identities on the commits themselves, and the emdashes on those same commits.
