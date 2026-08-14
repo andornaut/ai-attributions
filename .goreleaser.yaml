@@ -32,7 +32,7 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     files:
       - README.md
-      - LICENSE.md
+      - LICENSE
 
 checksum:
   name_template: 'checksums.txt'
