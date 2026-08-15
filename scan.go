@@ -24,9 +24,9 @@ type findings struct {
 	// len(changes): an agent identity with nowhere to move to is reported and
 	// counted, but produces no change.
 	flagged int
-	// emdashesAsked records whether --emdashes put emdashes in scope, which is
-	// what the counts have to name themselves after: the same tally answers a
-	// different question with the flag on.
+	// emdashesAsked records whether --emdashes put the dashes it covers in
+	// scope, which is what the counts have to name themselves after: the same
+	// tally answers a different question with the flag on.
 	emdashesAsked bool
 }
 
@@ -64,7 +64,7 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			found.skipped++
 		}
 
-		// A trailer moves a commit whatever else the message carries. Emdashes
+		// A trailer moves a commit whatever else the message carries. Dashes
 		// are taken separately, below, because they are only there to be taken
 		// where --emdashes asked.
 		if len(got.RemovedLines) > 0 {
@@ -97,11 +97,11 @@ func inspect(opts clean.Options, who identity, commits []gitexec.Commit) finding
 			}
 		}
 
-		// An emdash is a reason to rewrite a commit only where --emdashes asked
-		// for one: a message carries no changed lines otherwise. Asking makes it
-		// a finding of its own rather than a tidy-up riding along on a commit an
-		// attribution already moves, so a scan can fail on an emdash and the
-		// apply it names is what takes the emdash back out.
+		// An emdash or an endash is a reason to rewrite a commit only where
+		// --emdashes asked for one: a message carries no changed lines
+		// otherwise. Asking makes it a finding of its own rather than a tidy-up
+		// riding along on a commit an attribution already moves, so a scan can
+		// fail on a dash and the apply it names is what takes it back out.
 		if len(got.ChangedLines) > 0 {
 			flagged = true
 		}
@@ -158,7 +158,7 @@ func (f findings) report(verbose bool, scope string) {
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		say("\nemdash rewrites\n%6d  lines\n", f.emdashes)
+		say("\ndash rewrites\n%6d  lines\n", f.emdashes)
 	}
 	f.reportSkipped()
 	if !verbose {
@@ -176,12 +176,13 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	}
 }
 
-// subject names what a count is counting. --emdashes widens it: an emdash is a
-// finding in its own right once it is asked for, so a report that went on
-// saying "AI attributions" would be naming a cause the counts no longer have.
+// subject names what a count is counting. --emdashes widens it: an emdash or an
+// endash is a finding in its own right once it is asked for, so a report that
+// went on saying "AI attributions" would be naming a cause the counts no longer
+// have. "dashes" rather than either mark by name, since the flag covers both.
 func subject(emdashes bool) string {
 	if emdashes {
-		return "AI attributions or emdashes"
+		return "AI attributions or dashes"
 	}
 	return "AI attributions"
 }

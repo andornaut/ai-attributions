@@ -5,11 +5,11 @@
 
 AI attributions in commits are ads, remove them!
 
-Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the agent identities on the commits themselves. `--emdashes` adds the emdashes in the messages in scope, wherever they appear, and `--agents-files` adds the instruction files a ref ships.
+Strips AI attributions out of a repository's git history: co-author and session trailers, "generated with" footers, and the agent identities on the commits themselves. `--emdashes` adds the emdashes and endashes in the messages in scope, wherever they appear, and `--agents-files` adds the instruction files a ref ships.
 
 ```console
 $ ai-attributions --emdashes ~/src/example
-2 of 5 commits carry AI attributions or emdashes, across refs/heads/main
+2 of 5 commits carry AI attributions or dashes, across refs/heads/main
 
 removed lines
      2  Co-Authored-By: Claude <noreply@anthropic.com>
@@ -18,7 +18,7 @@ removed lines
 identities
      1  author Claude <noreply@anthropic.com> -> andornaut <andornaut@users.noreply.github.com>
 
-emdash rewrites
+dash rewrites
      2  lines
 
 pass --verbose to list the commits behind these counts
@@ -33,7 +33,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Scanning](#scanning) is the default - nothing is rewritten unless `apply` asks for it
 - [Trailers and footers](#trailers-and-footers) that name an agent are dropped, and human co-authors are kept
 - [Identities](#identities) - agent-authored commits are re-attributed, which is what GitHub's contributor list reads
-- [Emdashes](#emdashes) are left alone unless `--emdashes` asks for them, and then they are a finding of their own
+- [Emdashes and endashes](#emdashes-and-endashes) are left alone unless `--emdashes` asks for them, and then they are a finding of their own
 - [Agent instruction files](#agent-instruction-files) a ref ships are reported where `--agents-files` asks for them
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) are reported but never rewritten
 - [Several repositories](#sweeping-several-repositories) in one run, summarized a line each, and [`--quiet`](#quiet-runs) so a scheduled sweep speaks only when it finds something
@@ -69,9 +69,10 @@ usage: ai-attributions [command] [flags] [repo-path...]
 AI attributions in commits are ads, remove them!
 
 Reports the AI attributions in a repository's history, and, where the flags for
-them ask, its emdashes and the agent instruction files its refs carry. Nothing
-is rewritten unless the apply command asks for it. repo-path defaults to the
-current directory; more than one path runs each in turn and summarizes them.
+them ask, its emdashes and endashes and the agent instruction files its refs
+carry. Nothing is rewritten unless the apply command asks for it. repo-path
+defaults to the current directory; more than one path runs each in turn and
+summarizes them.
 
 commands:
   scan                 report what would change (default)
@@ -82,7 +83,7 @@ commands:
 
 exit status:
   0  nothing found
-  1  attributions, or the emdashes and instruction files the flags for them
+  1  attributions, or the dashes and instruction files the flags for them
      put in scope, found with --exit-code
   2  the run could not complete
   3  nothing was examined, a fork for instance, with --exit-code
@@ -95,7 +96,7 @@ flags:
   -current-branch
     	only the branch that is checked out, not every local branch and tag
   -emdashes
-    	also report emdashes, and rewrite them, rather than leaving them alone
+    	also report emdashes and endashes, and rewrite them, rather than leaving them alone
   -exclude glob
     	skip refs matching this glob (repeatable)
   -exit-code
@@ -182,9 +183,9 @@ This is the half that GitHub reads: the contributor list is built from commit au
 
 Scanning reports agent identities without an identity configured; only `apply` requires one.
 
-### Emdashes
+### Emdashes and endashes
 
-Off unless `--emdashes` asks for it: a typographic mark is a house style rather than an ad, so attributions alone decide what a run finds by default. Asking makes an emdash a finding in its own right, counted toward `--exit-code` and rewritten wherever it appears, so a build the flag fails is a build the `apply` it names fixes. Without the flag, an emdash is not looked at.
+Off unless `--emdashes` asks for it: a typographic mark is a house style rather than an ad, so attributions alone decide what a run finds by default. Asking makes an emdash or an endash a finding in its own right, counted toward `--exit-code` and rewritten wherever it appears, so a build the flag fails is a build the `apply` it names fixes. Without the flag, neither is looked at.
 
 An emdash or an endash becomes a hyphen, a run of them becomes one, and the spacing around them is left as it was: `the parser — which is old — broke` becomes `the parser - which is old - broke`, and `read—write` becomes `read-write`. The figure dash and the horizontal bar are not touched, being typography for a numeric span and for quoted speech rather than punctuation a hyphen stands in for. A dash inside a URL is part of the address, so it is left alone.
 
@@ -320,12 +321,12 @@ Input | Default | What it is
 `version` | the release the action was cut with | the release to install
 `path` | `.` | the repository to scan, relative to the workspace
 `identity` | whoever pushed, at their GitHub address | the identity the report names for an agent-authored commit
-`emdashes` | `false` | fail the run on the emdashes in the commit messages it reads
+`emdashes` | `false` | fail the run on the emdashes and endashes in the commit messages it reads
 `agents-files` | `false` | fail the run on the agent instruction files the branch carries
 
 `emdashes` and `agents-files` are off for the same reason the flags behind them are: a house style and a contributor's tooling are a repository's own call, and a scan that failed a build over either unasked would be answering a question nobody put to it. Turn one on and the failure names it like any other finding, and the `apply` the job offers is given the same flags, so the command it prints answers for what failed the build.
 
-Each needs a `version` carrying the check behind it, and the two fail differently on one that does not. `agents-files` ends the step, the binary having no such flag to parse. `emdashes` is quieter: every release has had that flag, so an older one accepts it and applies what it meant at the time, which was a tidy-up riding along on commits an attribution already moved. An emdash-only commit then passes green under an input that says it fails. A release carrying `--agents-files` is one where `--emdashes` means what this document says it means; pin or move `version` with these inputs.
+Each needs a `version` carrying the check behind it, and the two fail differently on one that does not. `agents-files` ends the step, the binary having no such flag to parse. `emdashes` is quieter: every release has had that flag, so an older one accepts it and applies what it meant at the time, which was a tidy-up riding along on commits an attribution already moved. A dash-only commit then passes green under an input that says it fails. A release carrying `--agents-files` is one where `--emdashes` means what this document says it means; pin or move `version` with these inputs.
 
 ```yaml
       - uses: andornaut/ai-attributions@v1

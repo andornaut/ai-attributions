@@ -1,6 +1,6 @@
 // Package clean rewrites commit messages to remove AI attribution trailers and
-// emdashes, and names the identities and instruction-file paths an agent leaves
-// behind.
+// the dashes replaceDashes covers, and names the identities and
+// instruction-file paths an agent leaves behind.
 package clean
 
 import (

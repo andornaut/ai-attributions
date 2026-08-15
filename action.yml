@@ -36,12 +36,14 @@ inputs:
     default: ""
   emdashes:
     description: >-
-      Fail the run on the emdashes in the commit messages it reads, as well as
-      on the attributions. Off by default: a typographic mark is a house style
-      rather than an ad, so a repository asks for it. apply takes them back out.
-      Needs a version where an emdash is a finding of its own, which is any that
-      also has agents-files: an older release accepts the flag with the meaning
-      it had then, a tidy-up riding along, and passes an emdash-only commit.
+      Fail the run on the emdashes and endashes in the commit messages it reads,
+      as well as on the attributions. The figure dash and the horizontal bar are
+      left alone. Off by default: a typographic mark is a house style rather
+      than an ad, so a repository asks for it. apply takes them back out.
+      Needs a version where such a dash is a finding of its own, which is any
+      that also has agents-files: an older release accepts the flag with the
+      meaning it had then, a tidy-up riding along, and passes a dash-only
+      commit.
     required: false
     default: "false"
   agents-files:
@@ -205,8 +207,8 @@ runs:
         # Both flags landed in v1.3.0, and an older pin is refused rather than
         # asked a question it answers differently: --agents-files did not exist,
         # so the binary exits 2 on an unknown flag, and --emdashes meant a
-        # tidy-up riding along on a commit an attribution already moved, so an
-        # emdash-only commit passes green under an input whose description says
+        # tidy-up riding along on a commit an attribution already moved, so a
+        # dash-only commit passes green under an input whose description says
         # it fails. Read from the input rather than from the binary, which names
         # itself for the commit it was built at: a dev build reports a v0.0.0
         # pseudo-version and would fail a check on its own version. A version

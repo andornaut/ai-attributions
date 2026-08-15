@@ -154,10 +154,10 @@ func TestReportNamesEmdashesOnlyWhenAskedFor(t *testing.T) {
 	commits := []gitexec.Commit{commit(person, "e1", "tidy the parser — it was unreadable\n")}
 
 	report := captureReport(t, func() { inspect(all, who, commits).report(false, "refs/heads/main") })
-	if !strings.Contains(report, "1 of 1 commits carry AI attributions or emdashes") {
+	if !strings.Contains(report, "1 of 1 commits carry AI attributions or dashes") {
 		t.Errorf("report did not count the emdash as a finding:\n%s", report)
 	}
-	if !strings.Contains(report, "emdash rewrites\n     1  lines") {
+	if !strings.Contains(report, "dash rewrites\n     1  lines") {
 		t.Errorf("report did not tally the emdash rewrite:\n%s", report)
 	}
 
