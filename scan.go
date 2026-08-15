@@ -133,36 +133,36 @@ func mapping(field, name, address string, who identity) string {
 // scope names the history the counts answer for.
 func (f findings) report(verbose bool, scope string) {
 	if f.flagged == 0 {
-		say("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
+		sayf("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
 		f.reportSkipped()
 		return
 	}
 
 	if verbose {
 		for _, item := range f.details {
-			say("%s %s\n", item.commit.Short(), item.commit.Subject())
+			sayf("%s %s\n", item.commit.Short(), item.commit.Subject())
 			for _, line := range item.removedLines {
-				say("    - %s\n", line)
+				sayf("    - %s\n", line)
 			}
 			for _, change := range item.changedLines {
-				say("    - %s\n    + %s\n", change.Old, change.New)
+				sayf("    - %s\n    + %s\n", change.Old, change.New)
 			}
 			for _, label := range item.identities {
-				say("    ~ %s\n", label)
+				sayf("    ~ %s\n", label)
 			}
 		}
-		say("\n")
+		sayf("\n")
 	}
 
-	say("%d of %d commits carry %s, across %s\n", f.flagged, f.commits, subject(f.emdashesAsked), scope)
+	sayf("%d of %d commits carry %s, across %s\n", f.flagged, f.commits, subject(f.emdashesAsked), scope)
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		say("\ndash rewrites\n%6d  lines\n", f.emdashes)
+		sayf("\ndash rewrites\n%6d  lines\n", f.emdashes)
 	}
 	f.reportSkipped()
 	if !verbose {
-		say("\npass --verbose to list the commits behind these counts\n")
+		sayf("\npass --verbose to list the commits behind these counts\n")
 	}
 }
 
@@ -170,9 +170,9 @@ func (f findings) reportTally(title string, tally map[string]int) {
 	if len(tally) == 0 {
 		return
 	}
-	say("\n%s\n", title)
+	sayf("\n%s\n", title)
 	for _, key := range sortedByCount(tally) {
-		say("%6d  %s\n", tally[key], key)
+		sayf("%6d  %s\n", tally[key], key)
 	}
 }
 
@@ -190,9 +190,9 @@ func subject(emdashes bool) string {
 func (f findings) reportSkipped() {
 	switch {
 	case f.skipped == 1:
-		say("\n1 commit message was skipped because it is not valid UTF-8\n")
+		sayf("\n1 commit message was skipped because it is not valid UTF-8\n")
 	case f.skipped > 1:
-		say("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
+		sayf("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
 	}
 }
 
@@ -241,12 +241,12 @@ func (a agentFiles) report(verbose bool) {
 	}
 	paths := slices.Sorted(maps.Keys(a))
 
-	say("\nagent instruction files, counted by the refs in scope that carry them\n")
+	sayf("\nagent instruction files, counted by the refs in scope that carry them\n")
 	for _, path := range paths {
-		say("%6d  %s\n", len(a[path]), path)
+		sayf("%6d  %s\n", len(a[path]), path)
 		if verbose {
 			for _, ref := range a[path] {
-				say("        %s\n", ref)
+				sayf("        %s\n", ref)
 			}
 		}
 	}
@@ -254,20 +254,20 @@ func (a agentFiles) report(verbose bool) {
 	// Said here because the report above this one answers for commits, and a
 	// run whose commits were clean would otherwise open on a clean line and
 	// close on a status nothing in the report accounted for.
-	say("\na file here is a finding of its own: --exit-code exits 1 whatever the\n")
-	say("commit walk above reported\n")
+	sayf("\na file here is a finding of its own: --exit-code exits 1 whatever the\n")
+	sayf("commit walk above reported\n")
 
-	say("\nthese configure a contributor's agent rather than the project, so they\n")
-	say("belong in a global ignore file. Take one out of the branch that carries it:\n")
+	sayf("\nthese configure a contributor's agent rather than the project, so they\n")
+	sayf("belong in a global ignore file. Take one out of the branch that carries it:\n")
 	for _, path := range paths {
-		say("  git rm -r --cached %s\n", path)
+		sayf("  git rm -r --cached %s\n", path)
 	}
 	// Said plainly, because the counts above name tags as readily as branches
 	// and the command above cannot do anything about a tag.
-	say("\nevery other ref keeps its copy, and so does the history: this tool\n")
-	say("rewrites messages and identities, never trees\n")
+	sayf("\nevery other ref keeps its copy, and so does the history: this tool\n")
+	sayf("rewrites messages and identities, never trees\n")
 	if !verbose {
-		say("\npass --verbose to list the refs behind these counts\n")
+		sayf("\npass --verbose to list the refs behind these counts\n")
 	}
 }
 
@@ -280,7 +280,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (m
 	if len(f.changes) == 0 {
 		return moved, nil
 	}
-	say("\n")
+	sayf("\n")
 	for _, ref := range refs {
 		// The same range the commits were read from. A change can only be in
 		// scope, so nothing below the base can be dirty, and walking to the
@@ -316,7 +316,7 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (m
 		if earliest == "" {
 			continue
 		}
-		say("%s: %d of %d commits will change hash, starting at %s %s\n",
+		sayf("%s: %d of %d commits will change hash, starting at %s %s\n",
 			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
 	}
 	return moved, nil
@@ -376,23 +376,23 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 	// --quiet from weighing this report by an outcome it never produces.
 	if len(stale) > 0 {
 		noteworthy = true
-		say("\nnaming history this repository has already rewritten locally: %s\n",
+		sayf("\nnaming history this repository has already rewritten locally: %s\n",
 			strings.Join(stale, ", "))
-		say("pushing the rewrite settles these; until then the remote still holds what it started from\n")
+		sayf("pushing the rewrite settles these; until then the remote still holds what it started from\n")
 	}
 	if len(lines) == 0 {
 		return nil
 	}
 
 	noteworthy = true
-	say("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
+	sayf("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
 	for _, line := range lines {
-		say("%s\n", line)
+		sayf("%s\n", line)
 	}
-	say("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
+	sayf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
 	// The cause is not knowable without the network, and a scan does not use
 	// it, so the mechanism is stated rather than one guess at which it is.
-	say("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
+	sayf("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
 	return nil
 }
 

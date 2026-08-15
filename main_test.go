@@ -80,7 +80,8 @@ func TestExcludeMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern+" vs "+tt.ref, func(t *testing.T) {
-			got, err := refPatterns{tt.pattern}.matches(tt.ref)
+			patterns := refPatterns{tt.pattern}
+			got, err := patterns.matches(tt.ref)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +93,8 @@ func TestExcludeMatches(t *testing.T) {
 }
 
 func TestExcludeMatchesRejectsABadPattern(t *testing.T) {
-	if _, err := (refPatterns{"["}).matches("refs/heads/main"); err == nil {
+	bad := refPatterns{"["}
+	if _, err := bad.matches("refs/heads/main"); err == nil {
 		t.Error("matches() accepted an unparseable glob")
 	}
 }
@@ -276,7 +278,7 @@ func TestPublishable(t *testing.T) {
 	}
 	want := []string{"refs/heads/main", "refs/tags/v1"}
 
-	var got []string
+	got := make([]string, 0, len(targets))
 	for _, t := range publishable(targets) {
 		got = append(got, t.ref)
 	}

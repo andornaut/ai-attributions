@@ -10,6 +10,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -78,7 +79,7 @@ var noteworthy bool
 // say writes one piece of the report. The write error is dropped: a report that
 // cannot reach a closed stdout is not a reason to fail a rewrite that worked,
 // and every caller would otherwise carry a check it has no answer for.
-func say(format string, args ...any) {
+func sayf(format string, args ...any) {
 	said = true
 	_, _ = fmt.Fprintf(out, format, args...)
 }
@@ -86,21 +87,21 @@ func say(format string, args ...any) {
 // reportDone closes an apply that completed, so that a report ending without
 // this line is a run that stopped part way rather than one that finished with
 // little to say.
-func reportDone(format string, args ...any) {
-	say("\n%s %s\n", paint(colorOut, green, "done:"), fmt.Sprintf(format, args...))
+func reportDonef(format string, args ...any) {
+	sayf("\n%s %s\n", paint(colorOut, green, "done:"), fmt.Sprintf(format, args...))
 }
 
 // reportNothingToRewrite closes an apply that had nothing to do, so that every
 // apply that ran to the end says so, whether or not it changed anything.
 func reportNothingToRewrite(cfg config) {
 	if cfg.applying() {
-		reportDone("nothing to rewrite")
+		reportDonef("nothing to rewrite")
 	}
 }
 
 // reportFailure writes the line that says a run could not complete. It goes to
 // stderr, so a caller can redirect the report and still see what went wrong.
-func reportFailure(format string, args ...any) {
+func reportFailuref(format string, args ...any) {
 	// The blank line separates the failure from the report above it, which it
 	// can only do when both land in the same place. A report redirected
 	// elsewhere leaves the failure alone on the stream, with nothing above it
@@ -256,7 +257,7 @@ func main() {
 	if err != nil {
 		// Every failure exits 2, the status the flag package already uses, so a
 		// caller can tell a finding from a run that could not look.
-		reportFailure("%v", err)
+		reportFailuref("%v", err)
 		os.Exit(2)
 	}
 	os.Exit(status)
@@ -268,14 +269,14 @@ func run(argv []string) (int, error) {
 		return 0, err
 	}
 	if cfg.command == "version" {
-		say("%s\n", version())
+		sayf("%s\n", version())
 		return 0, nil
 	}
 
 	stamp := ""
 	if cfg.command == "restore" {
 		if len(args) == 0 {
-			return 0, fmt.Errorf("restore needs a backup timestamp; ai-attributions backups lists them")
+			return 0, errors.New("restore needs a backup timestamp; ai-attributions backups lists them")
 		}
 		stamp, args = args[0], args[1:]
 		// The timestamp comes first, so a lone path would otherwise be read as
@@ -358,7 +359,7 @@ func runRepo(cfg config, stamp, repoPath string) (outcome, error) {
 	if isFork {
 		reportFork(repo, upstream)
 		if cfg.applying() {
-			reportDone("nothing examined, a fork is not this repository's to rewrite")
+			reportDonef("nothing examined, a fork is not this repository's to rewrite")
 		}
 		return outcomeSkipped, nil
 	}
@@ -386,10 +387,10 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// it goes straight out under a heading instead of being weighed against
 		// an outcome none of them produce.
 		if !cfg.scanning() {
-			say("=== %s\n", repoPath)
+			sayf("=== %s\n", repoPath)
 			if _, err := runRepo(cfg, stamp, repoPath); err != nil {
 				failed = true
-				reportFailure("%s: %v", repoPath, err)
+				reportFailuref("%s: %v", repoPath, err)
 			}
 			continue
 		}
@@ -406,8 +407,8 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// itself goes to stderr, where a single run puts it.
 		if err != nil {
 			failed = true
-			say("%s %s\n", column(colorOut, red, "failed"), repoPath)
-			reportFailure("%s: %v", repoPath, err)
+			sayf("%s %s\n", column(colorOut, red, "failed"), repoPath)
+			reportFailuref("%s: %v", repoPath, err)
 			// Whatever the run reported before it failed is still worth having:
 			// an apply that failed at the push has already named the backup it
 			// saved and the refs it moved.
@@ -421,13 +422,16 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// a status the caller reads.
 		speak := !cfg.quiet || worthSaying(cfg, ended, nil)
 		if speak {
-			say("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
+			sayf("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		}
 		switch ended {
 		case outcomeFound:
 			found = true
 		case outcomeSkipped:
 			skipped = true
+		case outcomeClean:
+			// Neither flag: a clean repository is what the exit status reports
+			// when nothing else happened.
 		}
 		if ended != outcomeClean && speak {
 			reports = append(reports, result{path: repoPath, report: buf.String()})
@@ -438,7 +442,7 @@ func sweep(cfg config, stamp string, paths []string) int {
 		if strings.TrimSpace(r.report) == "" {
 			continue
 		}
-		say("\n=== %s\n%s", r.path, r.report)
+		sayf("\n=== %s\n%s", r.path, r.report)
 	}
 
 	// Worst first, and decided by what the sweep saw rather than by which
@@ -487,13 +491,13 @@ func parseArgs(argv []string) (config, []string, error) {
 
 	switch {
 	case cfg.push && !cfg.applying():
-		return cfg, nil, fmt.Errorf("--push belongs to apply; there is nothing to push until the history is rewritten")
+		return cfg, nil, errors.New("--push belongs to apply; there is nothing to push until the history is rewritten")
 	case cfg.base != "" && !cfg.scanning():
-		return cfg, nil, fmt.Errorf("--base belongs to scan and apply, which are the commands that walk the history")
+		return cfg, nil, errors.New("--base belongs to scan and apply, which are the commands that walk the history")
 	case cfg.exitCode && !cfg.scanning():
-		return cfg, nil, fmt.Errorf("--exit-code belongs to scan and apply, which are the commands that look for attributions")
+		return cfg, nil, errors.New("--exit-code belongs to scan and apply, which are the commands that look for attributions")
 	case cfg.quiet && !cfg.scanning():
-		return cfg, nil, fmt.Errorf("--quiet belongs to scan and apply; what backups and restore print is the whole point of running them")
+		return cfg, nil, errors.New("--quiet belongs to scan and apply; what backups and restore print is the whole point of running them")
 	}
 	return cfg, flags.Args(), nil
 }
@@ -533,9 +537,9 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	}
 	if len(commits) == 0 {
 		if cfg.base == "" {
-			say("no commits to inspect\n")
+			sayf("no commits to inspect\n")
 		} else {
-			say("no commits to inspect: %s adds nothing over %s\n",
+			sayf("no commits to inspect: %s adds nothing over %s\n",
 				strings.Join(refs, ", "), cfg.base)
 		}
 		agents.report(cfg.verbose)
@@ -573,7 +577,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	}
 	if !cfg.applying() {
 		if len(found.changes) > 0 {
-			say("\nnothing was rewritten. Run apply to rewrite the history\n")
+			sayf("\nnothing was rewritten. Run apply to rewrite the history\n")
 		}
 		return outcomeFound, nil
 	}
@@ -619,13 +623,13 @@ func reportCarried(carried []target) {
 	if len(carried) == 0 {
 		return
 	}
-	say("\ntags naming a commit that changes hash, repointed along with it\n")
+	sayf("\ntags naming a commit that changes hash, repointed along with it\n")
 	for _, t := range carried {
 		if t.publish {
-			say("  %s\n", t.ref)
+			sayf("  %s\n", t.ref)
 			continue
 		}
-		say("  %s (excluded, so it is repointed here and not pushed)\n", t.ref)
+		sayf("  %s (excluded, so it is repointed here and not pushed)\n", t.ref)
 	}
 }
 
@@ -679,9 +683,9 @@ func ownProject(remotes []gitexec.Remote, own string) string {
 }
 
 func reportFork(repo *gitexec.Repo, upstream gitexec.Remote) {
-	say("%s %s: a fork, tracking %s through the %s remote\n",
+	sayf("%s %s: a fork, tracking %s through the %s remote\n",
 		paint(colorOut, blue, "skipping"), repo.Dir(), upstream.Project, upstream.Name)
-	say("history that arrives from another project is not this repository's to rewrite\n")
+	sayf("history that arrives from another project is not this repository's to rewrite\n")
 }
 
 // targetRemote is the remote the current branch tracks. A branch pushed
@@ -718,9 +722,9 @@ func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
 	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email"), enabled: true}
 	if !who.resolved() {
 		if cfg.applying() {
-			return identity{}, fmt.Errorf("the repository has no user.name and user.email to re-attribute to; pass --identity or --identity=none")
+			return identity{}, errors.New("the repository has no user.name and user.email to re-attribute to; pass --identity or --identity=none")
 		}
-		say("note: no user.name and user.email are set, so agent identities are reported but cannot be rewritten\n")
+		sayf("note: no user.name and user.email are set, so agent identities are reported but cannot be rewritten\n")
 		return identity{enabled: true}, nil
 	}
 	return who, nil
@@ -738,7 +742,7 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 		// A branch with no commits yet is a valid symbolic ref that nothing
 		// resolves to, which git log cannot walk.
 		if _, err := repo.Resolve(branch); err != nil {
-			return nil, nil
+			return nil, nil //nolint:nilerr // see above: an unborn branch is not an error
 		}
 		refs = []string{branch}
 	} else {
@@ -754,7 +758,7 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 		if excluded, err := cfg.exclude.matches(ref); err != nil {
 			return nil, err
 		} else if excluded {
-			say("excluding %s\n", ref)
+			sayf("excluding %s\n", ref)
 			continue
 		}
 		kept = append(kept, ref)
@@ -793,7 +797,7 @@ func scopeLabel(cfg config, refs []string) string {
 // matches tests each pattern against the full ref and its short forms, so
 // --exclude dev covers refs/tags/dev and --exclude agent-work covers
 // refs/remotes/origin/agent-work.
-func (p refPatterns) matches(ref string) (bool, error) {
+func (p *refPatterns) matches(ref string) (bool, error) {
 	candidates := []string{ref}
 	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
 		if short, ok := strings.CutPrefix(ref, prefix); ok {
@@ -807,7 +811,7 @@ func (p refPatterns) matches(ref string) (bool, error) {
 		}
 	}
 
-	for _, pattern := range p {
+	for _, pattern := range *p {
 		for _, candidate := range candidates {
 			matched, err := path.Match(pattern, candidate)
 			if err != nil {
@@ -837,7 +841,7 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 
 	publish := publishable(targets)
 	if len(publish) == 0 {
-		reportDone("no ref moved, so there is nothing to push")
+		reportDonef("no ref moved, so there is nothing to push")
 		return nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
@@ -850,16 +854,16 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	reportUnleased(publish)
 
 	if cfg.push {
-		say("\npushing to %s\n", cfg.remote)
+		sayf("\npushing to %s\n", cfg.remote)
 		if err := repo.Run(pushArgs(cfg.remote, publish)...); err != nil {
 			return err
 		}
-		reportDone("the history is rewritten and pushed to %s", cfg.remote)
+		reportDonef("the history is rewritten and pushed to %s", cfg.remote)
 		return nil
 	}
-	say("\nnot pushed. To publish the rewrite:\n\n    git %s\n",
+	sayf("\nnot pushed. To publish the rewrite:\n\n    git %s\n",
 		strings.Join(pushArgs(cfg.remote, publish), " "))
-	reportDone("the history is rewritten here, and not pushed")
+	reportDonef("the history is rewritten here, and not pushed")
 	return nil
 }
 
@@ -900,7 +904,7 @@ func checkRewritable(repo *gitexec.Repo, cfg config) error {
 		return err
 	}
 	if !isClean {
-		return fmt.Errorf("the working tree has uncommitted changes; commit or stash them first")
+		return errors.New("the working tree has uncommitted changes; commit or stash them first")
 	}
 	return nil
 }
@@ -928,7 +932,7 @@ func collectTargets(repo *gitexec.Repo, cfg config, refs []string, carried []tar
 			return nil, err
 		}
 	}
-	say("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
+	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
 	return targets, nil
 }
 
@@ -960,12 +964,12 @@ func resolveRewritten(repo *gitexec.Repo, targets []target) {
 }
 
 func reportRewritten(targets []target) {
-	say("\n")
+	sayf("\n")
 	for _, t := range targets {
 		if !t.moved() {
 			continue
 		}
-		say("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(t.after))
+		sayf("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(t.after))
 	}
 }
 
@@ -987,7 +991,7 @@ func publishable(targets []target) []target {
 func reportUnleased(targets []target) {
 	unleased := unleasedRefs(targets)
 	if len(unleased) > 0 {
-		say("\nno value on the remote to hold %s to, so these are forced\n",
+		sayf("\nno value on the remote to hold %s to, so these are forced\n",
 			strings.Join(unleased, ", "))
 	}
 }
@@ -1058,16 +1062,16 @@ func listBackups(repo *gitexec.Repo) error {
 		return err
 	}
 	if strings.TrimSpace(listing) == "" {
-		say("no backups saved\n")
+		sayf("no backups saved\n")
 		return nil
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
 		ref, hash, _ := strings.Cut(line, " ")
 		saved := strings.TrimPrefix(ref, backupPrefix)
 		stamp, original, _ := strings.Cut(saved, "/")
-		say("%s  refs/%s  %s\n", stamp, original, hash)
+		sayf("%s  refs/%s  %s\n", stamp, original, hash)
 	}
-	say("\nput one run back with: ai-attributions restore <timestamp>\n")
+	sayf("\nput one run back with: ai-attributions restore <timestamp>\n")
 	return nil
 }
 
@@ -1076,7 +1080,7 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 	// matches nothing.
 	stamp = strings.Trim(stamp, "/")
 	if stamp == "" {
-		return fmt.Errorf("restore needs a backup timestamp; ai-attributions backups lists them")
+		return errors.New("restore needs a backup timestamp; ai-attributions backups lists them")
 	}
 
 	prefix := backupPrefix + stamp + "/"
@@ -1099,13 +1103,13 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 		if err := repo.UpdateRef(hash, original); err != nil {
 			return err
 		}
-		say("%s -> %s\n", original, gitexec.Short(hash))
+		sayf("%s -> %s\n", original, gitexec.Short(hash))
 		restored++
 	}
 	if restored == 0 {
 		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
-	say("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
+	sayf("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
 	return nil
 }
 

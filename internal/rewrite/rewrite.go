@@ -3,6 +3,7 @@ package rewrite
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,7 +41,7 @@ if _change is not None:
 func CheckAvailable() error {
 	cmd := exec.Command("git", "filter-repo", "--version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git-filter-repo is not installed; see https://github.com/newren/git-filter-repo")
+		return errors.New("git-filter-repo is not installed; see https://github.com/newren/git-filter-repo")
 	}
 	return nil
 }
@@ -64,7 +65,8 @@ func Run(repo *gitexec.Repo, refs []string, changes map[string]Change) error {
 
 	// --refs takes every ref as values of a single flag; repeating the flag
 	// would keep only the last one.
-	args := []string{"filter-repo", "--force", "--partial", "--refs"}
+	args := make([]string, 0, 4+len(refs)+2)
+	args = append(args, "filter-repo", "--force", "--partial", "--refs")
 	args = append(args, refs...)
 	args = append(args, "--commit-callback", fmt.Sprintf(callbackTemplate, quotedPath))
 

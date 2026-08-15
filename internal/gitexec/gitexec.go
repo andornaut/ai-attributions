@@ -119,7 +119,7 @@ func (r *Repo) outputWithInput(stdin io.Reader, args ...string) (string, error) 
 // known path makes a question about the tips cost as much as the history.
 func (r *Repo) PathsAtRefs(refs, paths []string) (map[string][]string, error) {
 	if len(refs) == 0 || len(paths) == 0 {
-		return nil, nil
+		return map[string][]string{}, nil
 	}
 
 	var stdin bytes.Buffer
@@ -180,7 +180,7 @@ func (r *Repo) Run(args ...string) error {
 func (r *Repo) CurrentBranch() (string, error) {
 	out, err := r.Output("symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("HEAD is detached, so there is no current branch to rewrite; drop --current-branch or check out a branch")
+		return "", errors.New("HEAD is detached, so there is no current branch to rewrite; drop --current-branch or check out a branch")
 	}
 	return strings.TrimSpace(out), nil
 }
