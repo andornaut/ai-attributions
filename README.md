@@ -384,7 +384,7 @@ A carried tag is published with the rewrite rather than held back, since a tag l
 
 ## Developing
 
-- [andornaut@github /til/go](https://github.com/andornaut/til/blob/master/docs/go.md)
+- [andornaut@github /til/go](https://github.com/andornaut/til/blob/main/docs/go.md)
 - See [go.mod](./go.mod) for dependencies.
 
 ```bash
