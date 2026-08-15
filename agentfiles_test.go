@@ -22,7 +22,11 @@ func stage(t *testing.T, repo *gitexec.Repo, git func(args ...string), message s
 			t.Fatal(err)
 		}
 	}
-	git("add", "--all")
+	// --force because the fixture stages the very filenames a contributor's
+	// global gitignore is most likely to carry, these being the files the tool
+	// exists to find. Without it the test passes or fails on whose machine it
+	// ran rather than on the code.
+	git("add", "--all", "--force")
 	git("commit", "--quiet", "--message="+message)
 }
 
