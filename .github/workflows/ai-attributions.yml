@@ -43,6 +43,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7.0.1
         with:
+          # Nothing in this job uses the token, so it is not left
+          # in .git/config for a later step to read.
+          persist-credentials: false
           fetch-depth: 0
 
       # The action in this repository, installing the binary a release built.
