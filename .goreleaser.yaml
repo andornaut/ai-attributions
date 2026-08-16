@@ -10,12 +10,14 @@ before:
 # Linux only, which is what the release archives are installed on. The code is
 # built for unix generally, so adding darwin here is a one-line change.
 builds:
-  - id: ai-attributions
-    main: .
-    binary: ai-attributions
-    env: [CGO_ENABLED=0]
+  - env: [CGO_ENABLED=0]
     goos: [linux]
     goarch: [amd64, arm64]
+    main: .
+    binary: ai-attributions
+    # -trimpath keeps the build machine's absolute paths out of the binary, and
+    # -s -w drops the symbol table and DWARF. The dev build in release.yml
+    # passes the same pair, so a dev archive holds what a tagged one holds.
     flags: [-trimpath]
     ldflags: [-s -w]
 
@@ -31,8 +33,8 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
     files:
-      - README.md
       - LICENSE
+      - README.md
 
 checksum:
   name_template: 'checksums.txt'
