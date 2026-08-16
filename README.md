@@ -398,4 +398,4 @@ CI runs the tests, `golangci-lint`, and a cross-compile for each release platfor
 
 Every decision is made in Go. The rewrite writes a map of original commit hash to replacement fields, then hands `git-filter-repo` a `--commit-callback` that looks each commit up by `commit.original_id`, so what the scan prints is what gets written.
 
-[`internal/clean`](./internal/clean) holds the message and identity tests as pure functions and carries the test suite, [`internal/gitexec`](./internal/gitexec) wraps the git commands, [`internal/rewrite`](./internal/rewrite) drives `git-filter-repo`, and [`scan.go`](./scan.go) turns a walk of the history into the report.
+[`internal/clean`](./internal/clean) holds the message and identity tests as pure functions and carries the test suite, [`internal/gitexec`](./internal/gitexec) wraps the git commands, [`internal/rewrite`](./internal/rewrite) drives `git-filter-repo`, and [`internal/cli`](./internal/cli) reads the arguments, drives those three, and turns a walk of the history into the report. `main.go` calls it and exits on what it returns, and holds nothing else.
