@@ -1,441 +1,276 @@
+// The scan command, and resolving what a run is pointed at.
+
 package cli
 
 import (
+	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/andornaut/ai-attributions/internal/clean"
 	"github.com/andornaut/ai-attributions/internal/gitexec"
-	"github.com/andornaut/ai-attributions/internal/rewrite"
 )
 
-type findings struct {
-	changes    map[string]rewrite.Change
-	removed    map[string]int
-	identities map[string]int
-	details    []detail
-	emdashes   int
-	commits    int
-	skipped    int
-	// flagged counts commits carrying a finding, which is not the same as
-	// len(changes): an agent identity with nowhere to move to is reported and
-	// counted, but produces no change.
-	flagged int
-	// emdashesAsked records whether --emdashes put the dashes it covers in
-	// scope, which is what the counts have to name themselves after: the same
-	// tally answers a different question with the flag on.
-	emdashesAsked bool
-}
-
-// detail is one commit's findings, kept for -verbose.
-type detail struct {
-	commit       gitexec.Commit
-	removedLines []string
-	changedLines []clean.LineChange
-	identities   []string
-}
-
-// inspect works out what each commit needs, without changing anything.
-func inspect(opts clean.Options, who identity, commits []gitexec.Commit) findings {
-	found := findings{
-		changes:       map[string]rewrite.Change{},
-		removed:       map[string]int{},
-		identities:    map[string]int{},
-		commits:       len(commits),
-		emdashesAsked: opts.Emdashes,
+func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
+	who, err := targetIdentity(repo, cfg)
+	if err != nil {
+		return outcomeClean, err
+	}
+	refs, err := targetRefs(repo, cfg)
+	if err != nil {
+		return outcomeClean, err
+	}
+	// A question about the trees at the tips, so it is asked of the refs
+	// themselves rather than of the commits in range: a base that narrows the
+	// history to one pull request narrows nothing about what the branch ships.
+	// Asked only where --agents-files asks for it, and a run that never looked
+	// reports nothing and finds nothing, which an empty set already says.
+	var agents agentFiles
+	if cfg.agentsFiles {
+		agents, err = inspectAgentFiles(repo, refs)
+		if err != nil {
+			return outcomeClean, err
+		}
 	}
 
-	for _, commit := range commits {
-		var change rewrite.Change
-		item := detail{commit: commit}
-		flagged := false
-
-		// The rewrite carries messages as JSON, which cannot hold bytes that are
-		// not valid UTF-8. Such a message is left as it is, though the
-		// identities beside it can still be fixed.
-		var message string
-		var got clean.Findings
-		if utf8.ValidString(commit.Message) {
-			message, got = clean.Apply(opts, commit.Message)
+	commits, err := commitsInScope(repo, cfg, refs)
+	if err != nil {
+		return outcomeClean, err
+	}
+	if len(commits) == 0 {
+		if cfg.base == "" {
+			sayf("no commits to inspect\n")
 		} else {
-			found.skipped++
+			sayf("no commits to inspect: %s adds nothing over %s\n",
+				strings.Join(refs, ", "), cfg.base)
 		}
+		agents.report(cfg.verbose)
+		reportNothingToRewrite(cfg)
+		return agents.outcome(), nil
+	}
+	// Trailers are the point of the tool. Emdashes and endashes are asked for,
+	// and asking is what makes one a finding: a run that reports a dash rewrites
+	// it too, so what fails a build is what apply takes back out.
+	opts := clean.Options{Trailers: true, Emdashes: cfg.emdashes}
 
-		// A trailer moves a commit whatever else the message carries. Dashes
-		// are taken separately, below, because they are only there to be taken
-		// where --emdashes asked.
-		if len(got.RemovedLines) > 0 {
-			flagged = true
-			item.removedLines = got.RemovedLines
-			for _, line := range got.RemovedLines {
-				found.removed[strings.TrimSpace(line)]++
-			}
-		}
-
-		if who.enabled {
-			if clean.Identity(commit.AuthorName, commit.AuthorEmail) {
-				flagged = true
-				item.identities = append(item.identities,
-					mapping("author", commit.AuthorName, commit.AuthorEmail, who))
-				if who.resolved() {
-					change.AuthorName, change.AuthorEmail = who.name, who.address
-				}
-			}
-			if clean.Identity(commit.CommitterName, commit.CommitterEmail) {
-				flagged = true
-				item.identities = append(item.identities,
-					mapping("committer", commit.CommitterName, commit.CommitterEmail, who))
-				if who.resolved() {
-					change.CommitterName, change.CommitterEmail = who.name, who.address
-				}
-			}
-			for _, label := range item.identities {
-				found.identities[label]++
-			}
-		}
-
-		// An emdash or an endash is a reason to rewrite a commit only where
-		// --emdashes asked for one: a message carries no changed lines
-		// otherwise. Asking makes it a finding of its own rather than a tidy-up
-		// riding along on a commit an attribution already moves, so a scan can
-		// fail on a dash and the apply it names is what takes it back out.
-		if len(got.ChangedLines) > 0 {
-			flagged = true
-		}
-		if flagged && !got.Empty() {
-			change.Message = message
-			item.changedLines = got.ChangedLines
-			found.emdashes += len(got.ChangedLines)
-		}
-
-		if change != (rewrite.Change{}) {
-			found.changes[commit.Hash] = change
-		}
-		if flagged {
-			found.flagged++
-			found.details = append(found.details, item)
+	found := inspect(opts, who, commits)
+	found.report(cfg.verbose, scopeLabel(cfg, refs))
+	agents.report(cfg.verbose)
+	moved, err := found.reportRadius(repo, cfg, refs)
+	if err != nil {
+		return outcomeClean, err
+	}
+	carried, err := carriedTags(repo, cfg, refs, moved)
+	if err != nil {
+		return outcomeClean, err
+	}
+	reportCarried(carried)
+	// A remote branch sits outside a range rather than beside it, so a run
+	// given a base does not measure one against it.
+	if cfg.base == "" {
+		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+			return outcomeClean, err
 		}
 	}
-	return found
+
+	if found.flagged == 0 {
+		reportNothingToRewrite(cfg)
+		return agents.outcome(), nil
+	}
+	if !cfg.applying() {
+		if len(found.changes) > 0 {
+			sayf("\nnothing was rewritten. Run apply to rewrite the history\n")
+		}
+		return outcomeFound, nil
+	}
+	// A rewrite that succeeded still reports what it found, so that a job can
+	// tell a run that had to change something from one that had nothing to do.
+	if err := apply(repo, cfg, refs, carried, found.changes); err != nil {
+		return outcomeClean, err
+	}
+	return outcomeFound, nil
 }
 
-func mapping(field, name, address string, who identity) string {
-	if !who.resolved() {
-		return fmt.Sprintf("%s %s <%s> (no identity to move it to)", field, name, address)
+// carriedTags returns the tags that name a commit the rewrite moves and are not
+// in scope already. A rewritten commit gets a new hash, so a tag left out would
+// go on naming history nothing else references. Their commits are in the
+// rewrite either way, so carrying the tags repoints them without widening what
+// is rewritten.
+func carriedTags(repo *gitexec.Repo, cfg config, refs []string, moved map[string]bool) ([]target, error) {
+	if len(moved) == 0 {
+		return nil, nil
 	}
-	return fmt.Sprintf("%s %s <%s> -> %s", field, name, address, who)
-}
-
-// report prints the tallies, and every commit behind them under -verbose.
-// scope names the history the counts answer for.
-func (f findings) report(verbose bool, scope string) {
-	if f.flagged == 0 {
-		sayf("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
-		f.reportSkipped()
-		return
-	}
-
-	if verbose {
-		for _, item := range f.details {
-			sayf("%s %s\n", item.commit.Short(), item.commit.Subject())
-			for _, line := range item.removedLines {
-				sayf("    - %s\n", line)
-			}
-			for _, change := range item.changedLines {
-				sayf("    - %s\n    + %s\n", change.Old, change.New)
-			}
-			for _, label := range item.identities {
-				sayf("    ~ %s\n", label)
-			}
-		}
-		sayf("\n")
-	}
-
-	sayf("%d of %d commits carry %s, across %s\n", f.flagged, f.commits, subject(f.emdashesAsked), scope)
-	f.reportTally("removed lines", f.removed)
-	f.reportTally("identities", f.identities)
-	if f.emdashes > 0 {
-		sayf("\ndash rewrites\n%6d  lines\n", f.emdashes)
-	}
-	f.reportSkipped()
-	if !verbose {
-		sayf("\npass --verbose to list the commits behind these counts\n")
-	}
-}
-
-func (f findings) reportTally(title string, tally map[string]int) {
-	if len(tally) == 0 {
-		return
-	}
-	sayf("\n%s\n", title)
-	for _, key := range sortedByCount(tally) {
-		sayf("%6d  %s\n", tally[key], key)
-	}
-}
-
-// subject names what a count is counting. --emdashes widens it: an emdash or an
-// endash is a finding in its own right once it is asked for, so a report that
-// went on saying "AI attributions" would be naming a cause the counts no longer
-// have. "dashes" rather than either mark by name, since the flag covers both.
-func subject(emdashes bool) string {
-	if emdashes {
-		return "AI attributions or dashes"
-	}
-	return "AI attributions"
-}
-
-func (f findings) reportSkipped() {
-	switch {
-	case f.skipped == 1:
-		sayf("\n1 commit message was skipped because it is not valid UTF-8\n")
-	case f.skipped > 1:
-		sayf("\n%d commit messages were skipped because they are not valid UTF-8\n", f.skipped)
-	}
-}
-
-// agentFiles are the instruction files the refs in scope carry, as a path to
-// the refs holding it. Keyed by path rather than by ref, because the same file
-// on twenty tags is one file to take out, not twenty findings.
-type agentFiles map[string][]string
-
-// inspectAgentFiles looks for an agent's instruction files at the tip of every
-// ref in scope. Nothing here is ever rewritten: these are files in a tree, and
-// the rewrite replaces messages and identities.
-func inspectAgentFiles(repo *gitexec.Repo, refs []string) (agentFiles, error) {
-	byRef, err := repo.PathsAtRefs(refs, clean.AgentFiles())
+	tags, err := repo.Tags()
 	if err != nil {
 		return nil, err
 	}
 
-	found := agentFiles{}
-	for ref, paths := range byRef {
-		for _, path := range paths {
-			found[path] = append(found[path], ref)
+	var carried []target
+	for _, tag := range tags {
+		if !moved[tag.Commit] || slices.Contains(refs, tag.Ref) {
+			continue
 		}
-	}
-	for _, refs := range found {
-		slices.Sort(refs)
-	}
-	return found, nil
-}
-
-// outcome is how a run with nothing to rewrite ended. A committed instruction
-// file --agents-files asked about is a finding in its own right: no rewrite
-// this tool makes takes it back out, so a run that stayed quiet about it would
-// leave the one thing it found to be noticed by hand.
-func (a agentFiles) outcome() outcome {
-	if len(a) > 0 {
-		return outcomeFound
-	}
-	return outcomeClean
-}
-
-// report names the instruction files, the refs carrying them, and how to take
-// one out.
-func (a agentFiles) report(verbose bool) {
-	if len(a) == 0 {
-		return
-	}
-	paths := slices.Sorted(maps.Keys(a))
-
-	sayf("\nagent instruction files, counted by the refs in scope that carry them\n")
-	for _, path := range paths {
-		sayf("%6d  %s\n", len(a[path]), path)
-		if verbose {
-			for _, ref := range a[path] {
-				sayf("        %s\n", ref)
-			}
-		}
-	}
-
-	// Said here because the report above this one answers for commits, and a
-	// run whose commits were clean would otherwise open on a clean line and
-	// close on a status nothing in the report accounted for.
-	sayf("\na file here is a finding of its own: --exit-code exits 1 whatever the\n")
-	sayf("commit walk above reported\n")
-
-	sayf("\nthese configure a contributor's agent rather than the project, so they\n")
-	sayf("belong in a global ignore file. Take one out of the branch that carries it:\n")
-	for _, path := range paths {
-		sayf("  git rm -r --cached %s\n", path)
-	}
-	// Said plainly, because the counts above name tags as readily as branches
-	// and the command above cannot do anything about a tag.
-	sayf("\nevery other ref keeps its copy, and so does the history: this tool\n")
-	sayf("rewrites messages and identities, never trees\n")
-	if !verbose {
-		sayf("\npass --verbose to list the refs behind these counts\n")
-	}
-}
-
-// reportRadius names how many commits the rewrite moves, and returns every
-// commit that changes hash. Every descendant of a changed commit gets a new
-// hash, so the set is what a ref pointing into this history has to be measured
-// against.
-func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (map[string]bool, error) {
-	moved := map[string]bool{}
-	if len(f.changes) == 0 {
-		return moved, nil
-	}
-	sayf("\n")
-	for _, ref := range refs {
-		// The same range the commits were read from. A change can only be in
-		// scope, so nothing below the base can be dirty, and walking to the
-		// root would read a whole history to count a branch's few commits.
-		graph, err := repo.Graph(rangeSpec(cfg, ref))
+		excluded, err := cfg.exclude.matches(tag.Ref)
 		if err != nil {
 			return nil, err
 		}
-
-		dirty := make(map[string]bool, len(graph))
-		earliest := ""
-		// Reversed, so that a commit is decided after its parents are.
-		for i := len(graph) - 1; i >= 0; i-- {
-			hash, parents := graph[i][0], graph[i][1:]
-			if _, changed := f.changes[hash]; !changed {
-				changed = false
-				for _, parent := range parents {
-					if dirty[parent] {
-						changed = true
-						break
-					}
-				}
-				if !changed {
-					continue
-				}
-			}
-			dirty[hash] = true
-			moved[hash] = true
-			if earliest == "" {
-				earliest = hash
-			}
-		}
-		if earliest == "" {
-			continue
-		}
-		sayf("%s: %d of %d commits will change hash, starting at %s %s\n",
-			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
+		carried = append(carried, target{ref: tag.Ref, publish: !excluded})
 	}
-	return moved, nil
+	return carried, nil
 }
 
-// reportRemoteOnly names remote branches that carry attributions and are not
-// covered by the refs in scope, rather than rewriting refs the tool was not
-// pointed at. It reads remote-tracking refs, so a scan needs no network.
-// Nothing it finds counts toward the run's findings or its exit code, which
-// answer for the refs in scope, the same set apply rewrites.
-func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) error {
-	if !repo.HasRemote(cfg.remote) {
-		return nil
-	}
-	remoteRefs, err := repo.RemoteRefs(cfg.remote)
+// forkUpstream returns the remote through which a fork tracks the project it
+// was forked from. A remote named upstream is the convention that git and gh
+// set up; a remote that has been fetched from and points at another project is
+// the general case. Both are measured against own, the remote the current
+// branch tracks.
+func forkUpstream(repo *gitexec.Repo, own string) (gitexec.Remote, bool, error) {
+	remotes, err := repo.Remotes()
 	if err != nil {
-		return err
+		return gitexec.Remote{}, false, err
 	}
+	if len(remotes) < 2 {
+		return gitexec.Remote{}, false, nil
+	}
+	mine := ownProject(remotes, own)
 
-	// A ref left behind by this tool's own rewrite is separated out below, so
-	// that the history the run just replaced is not reported as a branch of its
-	// own to go and clean.
-	saved := rewrittenHere(repo)
+	for _, remote := range remotes {
+		if remote.Name == "upstream" && remote.Project != mine {
+			return remote, true, nil
+		}
+	}
+	for _, remote := range remotes {
+		if remote.Project == mine {
+			continue
+		}
+		// A remote that has never been fetched from, a deploy target for
+		// instance, has brought no history here.
+		refs, err := repo.RemoteRefs(remote.Name)
+		if err != nil {
+			return gitexec.Remote{}, false, err
+		}
+		if len(refs) > 0 {
+			return remote, true, nil
+		}
+	}
+	return gitexec.Remote{}, false, nil
+}
 
-	var lines, stale []string
-	for _, ref := range remoteRefs {
-		excluded, err := cfg.exclude.matches(ref)
-		if err != nil {
-			return err
+// ownProject returns the project the named remote points at, which the other
+// remotes are compared against. A repository whose branch tracks nothing falls
+// back to the first remote.
+func ownProject(remotes []gitexec.Remote, own string) string {
+	for _, remote := range remotes {
+		if remote.Name == own {
+			return remote.Project
 		}
-		if excluded {
-			continue
-		}
-		// A ref that cannot be walked is called out rather than skipped, so an
-		// unreadable branch does not read as a clean one.
-		commits, err := repo.CommitsNotIn(localRefs, []string{ref})
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))
-			continue
-		}
-		if len(commits) == 0 {
-			continue
-		}
-		if found := inspect(opts, who, commits); found.flagged > 0 {
-			if hash, err := repo.Resolve(ref); err == nil &&
-				saved[rewrittenKey(strings.TrimPrefix(ref, "refs/remotes/"+cfg.remote+"/"), hash)] {
-				stale = append(stale, ref)
-				continue
+	}
+	return remotes[0].Project
+}
+
+// targetRemote is the remote the current branch tracks. A branch pushed
+// somewhere other than origin would otherwise be leased and published against
+// the wrong remote.
+func targetRemote(repo *gitexec.Repo) string {
+	if ref, err := repo.CurrentBranch(); err == nil {
+		if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			if remote := repo.Config("branch." + branch + ".remote"); remote != "" {
+				return remote
 			}
-			lines = append(lines, fmt.Sprintf("%6d of %d commits  %s",
-				found.flagged, len(commits), ref))
 		}
 	}
-
-	// Both blocks below name work that is still to do and move no status, the
-	// refs in scope being what the status answers for. Marking them keeps
-	// --quiet from weighing this report by an outcome it never produces.
-	if len(stale) > 0 {
-		noteworthy = true
-		sayf("\nnaming history this repository has already rewritten locally: %s\n",
-			strings.Join(stale, ", "))
-		sayf("pushing the rewrite settles these; until then the remote still holds what it started from\n")
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-
-	noteworthy = true
-	sayf("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
-	for _, line := range lines {
-		sayf("%s\n", line)
-	}
-	sayf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
-	// The cause is not knowable without the network, and a scan does not use
-	// it, so the mechanism is stated rather than one guess at which it is.
-	sayf("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
-	return nil
+	return "origin"
 }
 
-// rewrittenHere returns the branches this tool has rewritten, each keyed with
-// the commit it pointed at beforehand. A remote-tracking ref still naming its
-// own branch's pre-rewrite tip is a push that has not happened; one that merely
-// sits on some other ref's old tip is a branch of its own, and pushing this
-// rewrite would not move it, so it is left to be reported as one.
-func rewrittenHere(repo *gitexec.Repo) map[string]bool {
-	saved := map[string]bool{}
-	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
-	if err != nil {
-		return saved
+// targetIdentity resolves who agent-authored commits are re-attributed to. A
+// bad --identity is always an error, but an unset git identity is only one when
+// there is a rewrite to do.
+func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
+	if cfg.identity == identityNone {
+		return identity{}, nil
 	}
-	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
-		ref, hash, ok := strings.Cut(line, " ")
-		if !ok {
+
+	if cfg.identity != "" {
+		name, address, found := strings.Cut(strings.TrimSuffix(strings.TrimSpace(cfg.identity), ">"), "<")
+		who := identity{name: strings.TrimSpace(name), address: strings.TrimSpace(address), enabled: true}
+		if !found || !who.resolved() {
+			return identity{}, fmt.Errorf("--identity should look like \"Name <email>\" with both parts set, or none, got %q", cfg.identity)
+		}
+		return who, nil
+	}
+
+	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email"), enabled: true}
+	if !who.resolved() {
+		if cfg.applying() {
+			return identity{}, errors.New("the repository has no user.name and user.email to re-attribute to; pass --identity or --identity=none")
+		}
+		sayf("note: no user.name and user.email are set, so agent identities are reported but cannot be rewritten\n")
+		return identity{enabled: true}, nil
+	}
+	return who, nil
+}
+
+// targetRefs returns the refs to scan and rewrite, or nothing when the
+// repository has no commits to walk.
+func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
+	var refs []string
+	if cfg.currentBranch {
+		branch, err := repo.CurrentBranch()
+		if err != nil {
+			return nil, err
+		}
+		// A branch with no commits yet is a valid symbolic ref that nothing
+		// resolves to, which git log cannot walk.
+		if _, err := repo.Resolve(branch); err != nil {
+			return nil, nil //nolint:nilerr // see above: an unborn branch is not an error
+		}
+		refs = []string{branch}
+	} else {
+		found, err := repo.ListRefs()
+		if err != nil {
+			return nil, err
+		}
+		refs = found
+	}
+
+	var kept []string
+	for _, ref := range refs {
+		if excluded, err := cfg.exclude.matches(ref); err != nil {
+			return nil, err
+		} else if excluded {
+			sayf("excluding %s\n", ref)
 			continue
 		}
-		if branch := backedUpBranch(ref); branch != "" {
-			saved[rewrittenKey(branch, hash)] = true
-		}
+		kept = append(kept, ref)
 	}
-	return saved
+	return kept, nil
 }
 
-// backedUpBranch returns the branch a backup ref was saved for, or "" for a tag,
-// which has no remote-tracking counterpart to be compared against. A backup is
-// saved as refs/ai-attributions-backup/<stamp>/heads/<branch>.
-func backedUpBranch(ref string) string {
-	saved, ok := strings.CutPrefix(ref, backupPrefix)
-	if !ok {
-		return ""
+// commitsInScope returns the commits to inspect: everything the refs in scope
+// reach, or only what they add over --base, which are the commits whoever
+// wrote them can still rewrite.
+func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Commit, error) {
+	// git log with no ref reads HEAD, which is the one thing a repository with
+	// no branch does not have.
+	if len(refs) == 0 {
+		return nil, nil
 	}
-	_, saved, ok = strings.Cut(saved, "/")
-	if !ok {
-		return ""
+	if cfg.base == "" {
+		return repo.Commits(refs)
 	}
-	branch, ok := strings.CutPrefix(saved, "heads/")
-	if !ok {
-		return ""
+	if _, err := repo.Resolve(cfg.base); err != nil {
+		return nil, fmt.Errorf("--base %q does not name a commit in this repository; fetch it first", cfg.base)
 	}
-	return branch
+	return repo.CommitsNotIn([]string{cfg.base}, refs)
 }
 
-func rewrittenKey(branch, hash string) string { return branch + " " + hash }
+// scopeLabel names the refs a report answers for and the base they were
+// measured against, so a count cannot be read as covering more than was walked.
+func scopeLabel(cfg config, refs []string) string {
+	scope := strings.Join(refs, ", ")
+	if cfg.base == "" {
+		return scope
+	}
+	return scope + " since " + cfg.base
+}
