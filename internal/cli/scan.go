@@ -12,7 +12,7 @@ import (
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
-func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
+func scan(repo *gitexec.Repo, cfg Config) (outcome, error) {
 	who, err := targetIdentity(repo, cfg)
 	if err != nil {
 		return outcomeClean, err
@@ -27,7 +27,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	// Asked only where --agents-files asks for it, and a run that never looked
 	// reports nothing and finds nothing, which an empty set already says.
 	var agents agentFiles
-	if cfg.agentsFiles {
+	if cfg.AgentsFiles {
 		agents, err = inspectAgentFiles(repo, refs)
 		if err != nil {
 			return outcomeClean, err
@@ -39,24 +39,24 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 		return outcomeClean, err
 	}
 	if len(commits) == 0 {
-		if cfg.base == "" {
+		if cfg.Base == "" {
 			sayf("no commits to inspect\n")
 		} else {
 			sayf("no commits to inspect: %s adds nothing over %s\n",
-				strings.Join(refs, ", "), cfg.base)
+				strings.Join(refs, ", "), cfg.Base)
 		}
-		agents.report(cfg.verbose)
+		agents.report(cfg.Verbose)
 		reportNothingToRewrite(cfg)
 		return agents.outcome(), nil
 	}
 	// Trailers are the point of the tool. Emdashes and endashes are asked for,
 	// and asking is what makes one a finding: a run that reports a dash rewrites
 	// it too, so what fails a build is what apply takes back out.
-	opts := clean.Options{Trailers: true, Emdashes: cfg.emdashes}
+	opts := clean.Options{Trailers: true, Emdashes: cfg.Emdashes}
 
 	found := inspect(opts, who, commits)
-	found.report(cfg.verbose, scopeLabel(cfg, refs))
-	agents.report(cfg.verbose)
+	found.report(cfg.Verbose, scopeLabel(cfg, refs))
+	agents.report(cfg.Verbose)
 	moved, err := found.reportRadius(repo, cfg, refs)
 	if err != nil {
 		return outcomeClean, err
@@ -68,7 +68,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 	reportCarried(carried)
 	// A remote branch sits outside a range rather than beside it, so a run
 	// given a base does not measure one against it.
-	if cfg.base == "" {
+	if cfg.Base == "" {
 		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 			return outcomeClean, err
 		}
@@ -97,7 +97,7 @@ func scan(repo *gitexec.Repo, cfg config) (outcome, error) {
 // go on naming history nothing else references. Their commits are in the
 // rewrite either way, so carrying the tags repoints them without widening what
 // is rewritten.
-func carriedTags(repo *gitexec.Repo, cfg config, refs []string, moved map[string]bool) ([]target, error) {
+func carriedTags(repo *gitexec.Repo, cfg Config, refs []string, moved map[string]bool) ([]target, error) {
 	if len(moved) == 0 {
 		return nil, nil
 	}
@@ -111,7 +111,7 @@ func carriedTags(repo *gitexec.Repo, cfg config, refs []string, moved map[string
 		if !moved[tag.Commit] || slices.Contains(refs, tag.Ref) {
 			continue
 		}
-		excluded, err := cfg.exclude.matches(tag.Ref)
+		excluded, err := cfg.Exclude.matches(tag.Ref)
 		if err != nil {
 			return nil, err
 		}
@@ -186,16 +186,16 @@ func targetRemote(repo *gitexec.Repo) string {
 // targetIdentity resolves who agent-authored commits are re-attributed to. A
 // bad --identity is always an error, but an unset git identity is only one when
 // there is a rewrite to do.
-func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
-	if cfg.identity == identityNone {
+func targetIdentity(repo *gitexec.Repo, cfg Config) (identity, error) {
+	if cfg.Identity == identityNone {
 		return identity{}, nil
 	}
 
-	if cfg.identity != "" {
-		name, address, found := strings.Cut(strings.TrimSuffix(strings.TrimSpace(cfg.identity), ">"), "<")
+	if cfg.Identity != "" {
+		name, address, found := strings.Cut(strings.TrimSuffix(strings.TrimSpace(cfg.Identity), ">"), "<")
 		who := identity{name: strings.TrimSpace(name), address: strings.TrimSpace(address), enabled: true}
 		if !found || !who.resolved() {
-			return identity{}, fmt.Errorf("--identity should look like \"Name <email>\" with both parts set, or none, got %q", cfg.identity)
+			return identity{}, fmt.Errorf("--identity should look like \"Name <email>\" with both parts set, or none, got %q", cfg.Identity)
 		}
 		return who, nil
 	}
@@ -213,9 +213,9 @@ func targetIdentity(repo *gitexec.Repo, cfg config) (identity, error) {
 
 // targetRefs returns the refs to scan and rewrite, or nothing when the
 // repository has no commits to walk.
-func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
+func targetRefs(repo *gitexec.Repo, cfg Config) ([]string, error) {
 	var refs []string
-	if cfg.currentBranch {
+	if cfg.CurrentBranch {
 		branch, err := repo.CurrentBranch()
 		if err != nil {
 			return nil, err
@@ -236,7 +236,7 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 
 	var kept []string
 	for _, ref := range refs {
-		if excluded, err := cfg.exclude.matches(ref); err != nil {
+		if excluded, err := cfg.Exclude.matches(ref); err != nil {
 			return nil, err
 		} else if excluded {
 			sayf("excluding %s\n", ref)
@@ -250,27 +250,27 @@ func targetRefs(repo *gitexec.Repo, cfg config) ([]string, error) {
 // commitsInScope returns the commits to inspect: everything the refs in scope
 // reach, or only what they add over --base, which are the commits whoever
 // wrote them can still rewrite.
-func commitsInScope(repo *gitexec.Repo, cfg config, refs []string) ([]gitexec.Commit, error) {
+func commitsInScope(repo *gitexec.Repo, cfg Config, refs []string) ([]gitexec.Commit, error) {
 	// git log with no ref reads HEAD, which is the one thing a repository with
 	// no branch does not have.
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	if cfg.base == "" {
+	if cfg.Base == "" {
 		return repo.Commits(refs)
 	}
-	if _, err := repo.Resolve(cfg.base); err != nil {
-		return nil, fmt.Errorf("--base %q does not name a commit in this repository; fetch it first", cfg.base)
+	if _, err := repo.Resolve(cfg.Base); err != nil {
+		return nil, fmt.Errorf("--base %q does not name a commit in this repository; fetch it first", cfg.Base)
 	}
-	return repo.CommitsNotIn([]string{cfg.base}, refs)
+	return repo.CommitsNotIn([]string{cfg.Base}, refs)
 }
 
 // scopeLabel names the refs a report answers for and the base they were
 // measured against, so a count cannot be read as covering more than was walked.
-func scopeLabel(cfg config, refs []string) string {
+func scopeLabel(cfg Config, refs []string) string {
 	scope := strings.Join(refs, ", ")
-	if cfg.base == "" {
+	if cfg.Base == "" {
 		return scope
 	}
-	return scope + " since " + cfg.base
+	return scope + " since " + cfg.Base
 }

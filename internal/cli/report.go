@@ -45,7 +45,7 @@ func reportDonef(format string, args ...any) {
 
 // reportNothingToRewrite closes an apply that had nothing to do, so that every
 // apply that ran to the end says so, whether or not it changed anything.
-func reportNothingToRewrite(cfg config) {
+func reportNothingToRewrite(cfg Config) {
 	if cfg.applying() {
 		reportDonef("nothing to rewrite")
 	}
@@ -104,8 +104,8 @@ func (o outcome) color() string {
 // status is the exit status an outcome reduces to. Like git diff --exit-code, a
 // finding is reported by the status only when it was asked for; a failure is
 // not routed through here, and always exits 2.
-func (o outcome) status(cfg config) int {
-	if !cfg.exitCode {
+func (o outcome) status(cfg Config) int {
+	if !cfg.ExitCode {
 		return 0
 	}
 	switch o {

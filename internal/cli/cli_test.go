@@ -48,7 +48,7 @@ func TestApplyReportsHowItEnded(t *testing.T) {
 			tt.setup(git)
 
 			report := capture(t, func() {
-				if _, err := runRepo(config{command: "apply"}, "", repo.Dir()); err != nil {
+				if _, err := runRepo(Config{Command: "apply"}, "", repo.Dir()); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -110,7 +110,7 @@ func TestCommitsInScope(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		cfg     config
+		cfg     Config
 		want    []string
 		wantErr bool
 	}{
@@ -120,16 +120,16 @@ func TestCommitsInScope(t *testing.T) {
 		},
 		{
 			name: "a base leaves the inherited commits out",
-			cfg:  config{base: "refs/heads/main"},
+			cfg:  Config{Base: "refs/heads/main"},
 			want: []string{"third"},
 		},
 		{
 			name: "a base the branch has not moved past leaves nothing",
-			cfg:  config{base: "refs/heads/agent-work"},
+			cfg:  Config{Base: "refs/heads/agent-work"},
 		},
 		{
 			name:    "a base that names no commit is an error, not an empty scope",
-			cfg:     config{base: "refs/heads/absent"},
+			cfg:     Config{Base: "refs/heads/absent"},
 			wantErr: true,
 		},
 	}
@@ -162,11 +162,11 @@ func TestCommitsInScope(t *testing.T) {
 // count cannot be read as covering more than was walked.
 func TestScopeLabel(t *testing.T) {
 	refs := []string{"refs/heads/agent-work"}
-	if got := scopeLabel(config{}, refs); got != "refs/heads/agent-work" {
+	if got := scopeLabel(Config{}, refs); got != "refs/heads/agent-work" {
 		t.Errorf("scopeLabel() = %q", got)
 	}
 	want := "refs/heads/agent-work since origin/main"
-	if got := scopeLabel(config{base: "origin/main"}, refs); got != want {
+	if got := scopeLabel(Config{Base: "origin/main"}, refs); got != want {
 		t.Errorf("scopeLabel() = %q, want %q", got, want)
 	}
 }
@@ -191,7 +191,7 @@ func TestCarriedTags(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		cfg    config
+		cfg    Config
 		refs   []string
 		moved  map[string]bool
 		want   []string
@@ -205,7 +205,7 @@ func TestCarriedTags(t *testing.T) {
 		},
 		{
 			name:   "an excluded tag is carried, and left out of the push",
-			cfg:    config{exclude: refPatterns{"dev"}},
+			cfg:    Config{Exclude: refPatterns{"dev"}},
 			refs:   []string{"refs/heads/main"},
 			moved:  moved,
 			want:   []string{"refs/tags/dev", "refs/tags/light", "refs/tags/v1"},
@@ -256,12 +256,12 @@ func TestRefSpecs(t *testing.T) {
 	targets := []target{{ref: "refs/heads/agent-work"}, {ref: "refs/tags/v1"}}
 
 	want := []string{"refs/heads/agent-work", "refs/tags/v1"}
-	if got := refSpecs(config{}, targets); !slices.Equal(got, want) {
+	if got := refSpecs(Config{}, targets); !slices.Equal(got, want) {
 		t.Errorf("refSpecs() = %v, want %v", got, want)
 	}
 
 	want = []string{"origin/main..refs/heads/agent-work", "origin/main..refs/tags/v1"}
-	if got := refSpecs(config{base: "origin/main"}, targets); !slices.Equal(got, want) {
+	if got := refSpecs(Config{Base: "origin/main"}, targets); !slices.Equal(got, want) {
 		t.Errorf("refSpecs() = %v, want %v", got, want)
 	}
 }
@@ -357,7 +357,7 @@ func TestOutcomeStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/exit-code=%v", tt.found, tt.exitCode), func(t *testing.T) {
-			if got := tt.found.status(config{exitCode: tt.exitCode}); got != tt.want {
+			if got := tt.found.status(Config{ExitCode: tt.exitCode}); got != tt.want {
 				t.Errorf("outcome(%s).status() = %d, want %d", tt.found, got, tt.want)
 			}
 		})
@@ -372,7 +372,7 @@ func TestTargetRefsScope(t *testing.T) {
 	git("switch", "--quiet", "--create", "agent-work")
 	git("commit", "--quiet", "--allow-empty", "--message=second")
 
-	refs, err := targetRefs(repo, config{})
+	refs, err := targetRefs(repo, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestTargetRefsScope(t *testing.T) {
 		t.Errorf("targetRefs() = %v, want %v", refs, want)
 	}
 
-	refs, err = targetRefs(repo, config{currentBranch: true})
+	refs, err = targetRefs(repo, Config{CurrentBranch: true})
 	if err != nil {
 		t.Fatal(err)
 	}

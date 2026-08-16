@@ -250,7 +250,7 @@ func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	git("reset", "--quiet", "--hard", "HEAD~1")
 	git("commit", "--quiet", "--allow-empty", "--message=rewritten")
 
-	cfg := config{remote: "origin"}
+	cfg := Config{Remote: "origin"}
 	opts := clean.Options{Trailers: true}
 	refs := []string{"refs/heads/main"}
 

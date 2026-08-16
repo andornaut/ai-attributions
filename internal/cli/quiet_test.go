@@ -33,7 +33,7 @@ func TestQuietPrintsOnlyWhatThereIsToAnswerFor(t *testing.T) {
 			repo, git := gitRepo(t)
 			git("commit", "--quiet", "--allow-empty", "--message="+tt.message)
 
-			cfg := config{command: "scan", quiet: true, exitCode: true}
+			cfg := Config{Command: "scan", Quiet: true, ExitCode: true}
 			var status int
 			report := captureReport(t, func() {
 				var err error
@@ -59,7 +59,7 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	git("commit", "--quiet", "--allow-empty",
 		"--message=Add a thing\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
 
-	loud := config{command: "scan", exitCode: true}
+	loud := Config{Command: "scan", ExitCode: true}
 	var want int
 	captureReport(t, func() {
 		found, err := runRepo(loud, "", repo.Dir())
@@ -72,7 +72,7 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	var got int
 	captureReport(t, func() {
 		var err error
-		if got, err = quietRepo(config{command: "scan", quiet: true, exitCode: true}, "", repo.Dir()); err != nil {
+		if got, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -96,7 +96,7 @@ func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(config{command: "scan", quiet: true, exitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -127,7 +127,7 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(config{command: "scan", quiet: true, exitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -140,24 +140,11 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 
 	repo = setup(t)
 	silent := captureReport(t, func() {
-		if _, err := quietRepo(config{command: "scan", quiet: true}, "", repo.Dir()); err != nil {
+		if _, err := quietRepo(Config{Command: "scan", Quiet: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if silent != "" {
 		t.Errorf("a fork spoke with no status to explain:\n%s", silent)
-	}
-}
-
-func TestQuietBelongsToTheCommandsThatLook(t *testing.T) {
-	if _, _, err := parseArgs([]string{"scan", "--quiet"}); err != nil {
-		t.Errorf("scan rejected --quiet: %v", err)
-	}
-	_, _, err := parseArgs([]string{"backups", "--quiet"})
-	if err == nil {
-		t.Fatal("backups accepted --quiet, which would hide the listing it exists to print")
-	}
-	if !strings.Contains(err.Error(), "--quiet") {
-		t.Errorf("the error does not name the flag: %v", err)
 	}
 }

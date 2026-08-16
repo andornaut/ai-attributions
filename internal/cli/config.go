@@ -12,39 +12,39 @@ const (
 // stampRe matches the timestamp a backup is saved under.
 var stampRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
-type config struct {
-	command string
-	// agentsFiles asks for the instruction files the refs in scope carry. Off
+type Config struct {
+	Command string
+	// AgentsFiles asks for the instruction files the refs in scope carry. Off
 	// by default, as --emdashes is: an agent instruction file is a contributor's
 	// business until a repository says otherwise, and a scan that reported one
 	// unasked would fail a build over a file no rewrite here takes back out.
-	agentsFiles bool
-	base        string
-	// currentBranch narrows the run to the branch that is checked out. The
+	AgentsFiles bool
+	Base        string
+	// CurrentBranch narrows the run to the branch that is checked out. The
 	// default is every local branch and tag, "is this repository clean" being
 	// the question the tool answers.
-	currentBranch bool
-	emdashes      bool
-	exclude       refPatterns
-	exitCode      bool
-	identity      string
-	push          bool
-	// quiet holds the report back unless the run has something to answer for,
+	CurrentBranch bool
+	Emdashes      bool
+	Exclude       refPatterns
+	ExitCode      bool
+	Identity      string
+	Push          bool
+	// Quiet holds the report back unless the run has something to answer for,
 	// which is what lets a scheduled run mail only the days that need one.
-	quiet   bool
-	verbose bool
+	Quiet   bool
+	Verbose bool
 
-	// remote is resolved from the branch's upstream, rather than assumed to be
+	// Remote is resolved from the branch's upstream, rather than assumed to be
 	// origin.
-	remote string
+	Remote string
 }
 
-func (c config) applying() bool { return c.command == "apply" }
+func (c Config) applying() bool { return c.Command == "apply" }
 
 // scanning reports whether the command walks the history looking for
 // attributions, which is what has a finding to report and a scope to report it
 // for. backups and restore only move refs this tool saved.
-func (c config) scanning() bool { return c.command == "scan" || c.applying() }
+func (c Config) scanning() bool { return c.Command == "scan" || c.applying() }
 
 // target is a ref to rewrite, the commit it pointed at beforehand, where it
 // ended up, and the value to expect on the remote when pushing. The lease is

@@ -11,9 +11,13 @@ package main
 import (
 	"os"
 
+	"github.com/andornaut/ai-attributions/cmd"
 	"github.com/andornaut/ai-attributions/internal/cli"
 )
 
 func main() {
-	os.Exit(cli.Main(os.Args[1:]))
+	cmd.Cmd.SetArgs(cmd.Args(os.Args[1:]))
+	if err := cmd.Cmd.Execute(); err != nil {
+		os.Exit(cli.ExitCode(err))
+	}
 }

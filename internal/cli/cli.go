@@ -5,79 +5,54 @@ package cli
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"io"
 	"strings"
 
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
-// Main runs the command and returns the status to exit with. It returns rather
-// than exiting so that the status is a value a test can assert on, which is
-// what the suite beside this file does.
-func Main(argv []string) int {
-	status, err := run(argv)
-	if err != nil {
-		// Every failure exits 2, the status the flag package already uses, so a
-		// caller can tell a finding from a run that could not look.
-		reportFailuref("%v", err)
-		return 2
+// Execute runs cfg against every path given and returns the status to exit
+// with. stamp is the backup the restore command puts back, and is empty for
+// every other command. No path means the current directory, which is what makes
+// the tool answerable from inside a checkout with nothing to name.
+func Execute(cfg Config, stamp string, paths []string) (int, error) {
+	if len(paths) == 0 {
+		paths = []string{"."}
 	}
-	return status
-}
-
-func run(argv []string) (int, error) {
-	cfg, args, err := parseArgs(argv)
-	if err != nil {
-		return 0, err
-	}
-	if cfg.command == "version" {
-		sayf("%s\n", version())
-		return 0, nil
+	if len(paths) > 1 {
+		return sweep(cfg, stamp, paths), nil
 	}
 
-	stamp := ""
-	if cfg.command == "restore" {
-		if len(args) == 0 {
-			return 0, errors.New("restore needs a backup timestamp; ai-attributions backups lists them")
-		}
-		stamp, args = args[0], args[1:]
-		// The timestamp comes first, so a lone path would otherwise be read as
-		// one.
-		if !stampRe.MatchString(strings.Trim(stamp, "/")) {
-			return 0, fmt.Errorf("restore expects a timestamp like 20260811T121757Z, got %q; ai-attributions backups lists them", stamp)
-		}
+	if cfg.Quiet {
+		return quietRepo(cfg, stamp, paths[0])
 	}
-	if len(args) == 0 {
-		args = []string{"."}
-	}
-	if len(args) > 1 {
-		return sweep(cfg, stamp, args), nil
-	}
-
-	if cfg.quiet {
-		return quietRepo(cfg, stamp, args[0])
-	}
-	found, err := runRepo(cfg, stamp, args[0])
+	found, err := runRepo(cfg, stamp, paths[0])
 	if err != nil {
 		return 0, err
 	}
 	return found.status(cfg), nil
 }
 
+// Version is the release this binary was built from, or "devel" for one built
+// any other way.
+func Version() string { return version() }
+
+// ValidStamp reports whether s names a backup the way restore expects, which is
+// what the timestamp in a `backups` listing looks like.
+func ValidStamp(s string) bool { return stampRe.MatchString(strings.Trim(s, "/")) }
+
 // worthSaying reports whether a --quiet run has to print what it buffered. A
 // finding and a failure are the obvious two. The third is a status the caller
 // will read: a non-zero exit with nothing above it names no repository and no
 // reason, which is the one answer a scheduled run cannot act on.
-func worthSaying(cfg config, ended outcome, err error) bool {
+func worthSaying(cfg Config, ended outcome, err error) bool {
 	return err != nil || ended == outcomeFound || noteworthy || ended.status(cfg) != 0
 }
 
 // quietRepo runs one repository with the report held in a buffer, and writes it
 // out only when there is something to answer for. A failure prints what the run
 // got as far as: a run that could not look is not a run that found nothing.
-func quietRepo(cfg config, stamp, repoPath string) (int, error) {
+func quietRepo(cfg Config, stamp, repoPath string) (int, error) {
 	previous, saidBefore := out, said
 	buf := &bytes.Buffer{}
 	out, noteworthy = buf, false
@@ -100,23 +75,23 @@ func quietRepo(cfg config, stamp, repoPath string) (int, error) {
 // runRepo does one repository's work and reports how it ended, leaving the exit
 // status to the caller, which is the only part that differs between a single
 // run and a sweep.
-func runRepo(cfg config, stamp, repoPath string) (outcome, error) {
+func runRepo(cfg Config, stamp, repoPath string) (outcome, error) {
 	repo, err := gitexec.Open(repoPath)
 	if err != nil {
 		return outcomeClean, err
 	}
-	cfg.remote = targetRemote(repo)
+	cfg.Remote = targetRemote(repo)
 
 	// backups and restore only put back refs this tool saved, so they stay
 	// available whatever the repository is.
-	switch cfg.command {
+	switch cfg.Command {
 	case "backups":
 		return outcomeClean, listBackups(repo)
 	case "restore":
 		return outcomeClean, restoreBackup(repo, stamp)
 	}
 
-	upstream, isFork, err := forkUpstream(repo, cfg.remote)
+	upstream, isFork, err := forkUpstream(repo, cfg.Remote)
 	if err != nil {
 		return outcomeClean, err
 	}
@@ -134,7 +109,7 @@ func runRepo(cfg config, stamp, repoPath string) (outcome, error) {
 // the full report for each one that found something. A repository that fails
 // does not end the sweep: the rest are still worth looking at, and a failure
 // nobody sees is the reason to keep going rather than stop.
-func sweep(cfg config, stamp string, paths []string) int {
+func sweep(cfg Config, stamp string, paths []string) int {
 	type result struct {
 		path   string
 		report string
@@ -184,7 +159,7 @@ func sweep(cfg config, stamp string, paths []string) int {
 		// thirty clean checkouts says nothing at all. A fork is nothing to
 		// answer for, being the same fork every day, until --exit-code makes it
 		// a status the caller reads.
-		speak := !cfg.quiet || worthSaying(cfg, ended, nil)
+		speak := !cfg.Quiet || worthSaying(cfg, ended, nil)
 		if speak {
 			sayf("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		}
@@ -215,7 +190,7 @@ func sweep(cfg config, stamp string, paths []string) int {
 	switch {
 	case failed:
 		return 2
-	case !cfg.exitCode:
+	case !cfg.ExitCode:
 		return 0
 	case found:
 		return 1

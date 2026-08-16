@@ -275,7 +275,7 @@ func (a agentFiles) report(verbose bool) {
 // commit that changes hash. Every descendant of a changed commit gets a new
 // hash, so the set is what a ref pointing into this history has to be measured
 // against.
-func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (map[string]bool, error) {
+func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (map[string]bool, error) {
 	moved := map[string]bool{}
 	if len(f.changes) == 0 {
 		return moved, nil
@@ -327,11 +327,11 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg config, refs []string) (m
 // pointed at. It reads remote-tracking refs, so a scan needs no network.
 // Nothing it finds counts toward the run's findings or its exit code, which
 // answer for the refs in scope, the same set apply rewrites.
-func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who identity, localRefs []string) error {
-	if !repo.HasRemote(cfg.remote) {
+func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who identity, localRefs []string) error {
+	if !repo.HasRemote(cfg.Remote) {
 		return nil
 	}
-	remoteRefs, err := repo.RemoteRefs(cfg.remote)
+	remoteRefs, err := repo.RemoteRefs(cfg.Remote)
 	if err != nil {
 		return err
 	}
@@ -343,7 +343,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 
 	var lines, stale []string
 	for _, ref := range remoteRefs {
-		excluded, err := cfg.exclude.matches(ref)
+		excluded, err := cfg.Exclude.matches(ref)
 		if err != nil {
 			return err
 		}
@@ -362,7 +362,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 		}
 		if found := inspect(opts, who, commits); found.flagged > 0 {
 			if hash, err := repo.Resolve(ref); err == nil &&
-				saved[rewrittenKey(strings.TrimPrefix(ref, "refs/remotes/"+cfg.remote+"/"), hash)] {
+				saved[rewrittenKey(strings.TrimPrefix(ref, "refs/remotes/"+cfg.Remote+"/"), hash)] {
 				stale = append(stale, ref)
 				continue
 			}
@@ -389,7 +389,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg config, opts clean.Options, who id
 	for _, line := range lines {
 		sayf("%s\n", line)
 	}
-	sayf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.remote)
+	sayf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.Remote)
 	// The cause is not knowable without the network, and a scan does not use
 	// it, so the mechanism is stated rather than one guess at which it is.
 	sayf("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")

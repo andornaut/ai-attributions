@@ -1,0 +1,99 @@
+package cmd
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// execute runs the root command as main does, and returns what it printed and
+// the error it ended with.
+func execute(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	Cmd.SetOut(buf)
+	Cmd.SetErr(buf)
+	Cmd.SetArgs(Args(args))
+	t.Cleanup(func() {
+		Cmd.SetOut(nil)
+		Cmd.SetErr(nil)
+		Cmd.SetArgs(nil)
+	})
+	return buf.String(), Cmd.Execute()
+}
+
+// A command takes the flags that describe the work it does and no others. The
+// parser this replaced registered every flag for every command and rejected the
+// wrong ones afterwards by hand, so the flags nobody had written a rule for
+// were accepted and ignored.
+func TestFlagsBelongToTheCommandsThatUseThem(t *testing.T) {
+	for _, flag := range []string{
+		"--agents-files", "--base=x", "--current-branch", "--emdashes",
+		"--exclude=x", "--exit-code", "--identity=x", "--push", "--quiet", "--verbose",
+	} {
+		t.Run("backups "+flag, func(t *testing.T) {
+			_, err := execute(t, "backups", flag, ".")
+			if err == nil {
+				t.Fatalf("backups accepted %s, which does nothing there", flag)
+			}
+			if !strings.Contains(err.Error(), strings.SplitN(flag, "=", 2)[0]) {
+				t.Errorf("the error does not name the flag: %v", err)
+			}
+		})
+	}
+}
+
+// --push rewrites the remote, so it belongs to apply and not to the scan that
+// changes nothing.
+func TestPushBelongsToApplyAlone(t *testing.T) {
+	if _, err := execute(t, "scan", "--push", "."); err == nil {
+		t.Fatal("scan accepted --push, which has nothing to push")
+	}
+	if apply.Flags().Lookup("push") == nil {
+		t.Error("apply does not take --push")
+	}
+}
+
+// The command is optional: what came before cobra read a first argument that
+// named no command as a repo-path, and scanned.
+func TestArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "nothing at all scans", args: nil, want: []string{"scan"}},
+		{name: "a path scans it", args: []string{"."}, want: []string{"scan", "."}},
+		{name: "a flag first still scans", args: []string{"--emdashes", "."}, want: []string{"scan", "--emdashes", "."}},
+		{name: "a command is left alone", args: []string{"apply", "."}, want: []string{"apply", "."}},
+		{name: "backups is left alone", args: []string{"backups"}, want: []string{"backups"}},
+		{name: "help is the root's", args: []string{"--help"}, want: []string{"--help"}},
+		{name: "-h is the root's", args: []string{"-h"}, want: []string{"-h"}},
+		// The flag package this replaced took one dash or two, and the
+		// documentation says so; pflag reads one dash as shorthands.
+		{name: "a single dash is widened", args: []string{"-emdashes", "."}, want: []string{"scan", "--emdashes", "."}},
+		{name: "a single dash with a value", args: []string{"-base=x", "."}, want: []string{"scan", "--base=x", "."}},
+		{name: "operands after -- are left", args: []string{"scan", "--", "-weird-path"}, want: []string{"scan", "--", "-weird-path"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Args(tt.args); !slices.Equal(got, tt.want) {
+				t.Errorf("Args(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// restore reads a timestamp before a path, so a lone path is refused rather
+// than taken for the backup to put back.
+func TestRestoreNeedsATimestamp(t *testing.T) {
+	for _, args := range [][]string{{"restore"}, {"restore", "notatimestamp"}} {
+		if _, err := execute(t, args...); err == nil {
+			t.Errorf("%q was accepted", args)
+		}
+	}
+	if _, err := execute(t, "restore", "20260811T121757Z", t.TempDir()); err == nil {
+		t.Error("a well formed timestamp was refused")
+	}
+}

@@ -61,54 +61,72 @@ pip install --user git-filter-repo   # or: apt install git-filter-repo
 
 ## Usage
 
-Run `ai-attributions --help` to view the available commands and flags:
+Run `ai-attributions --help` to view the commands, and
+`ai-attributions <command> --help` for the flags a command takes:
 
 ```text
-usage: ai-attributions [command] [flags] [repo-path...]
-
 AI attributions in commits are ads, remove them!
 
-Reports the AI attributions in a repository's history, and, where the flags for
-them ask, its emdashes and endashes and the agent instruction files its refs
-carry. Nothing is rewritten unless the apply command asks for it. repo-path
-defaults to the current directory; more than one path runs each in turn and
-summarizes them.
+Reports the AI attributions in a repository's history, and, where the
+flags for them ask, its emdashes and endashes and the agent instruction
+files its refs carry. Nothing is rewritten unless the apply command asks
+for it. repo-path defaults to the current directory; more than one path
+runs each in turn and summarizes them.
 
-commands:
-  scan                 report what would change (default)
-  apply                rewrite the history
-  backups              list the pre-rewrite refs saved by earlier runs
-  restore <timestamp>  put the refs saved by one run back
-  version              print the version
+A command is optional: with none, scan runs, so `ai-attributions .` and
+`ai-attributions scan .` are the same run.
 
-exit status:
+Exit status:
   0  nothing found
   1  attributions, or the dashes and instruction files the flags for them
      put in scope, found with --exit-code
-  2  the run could not complete
+  2  the run could not complete, or was invoked wrongly
   3  nothing was examined, a fork for instance, with --exit-code
 
-flags:
-  -agents-files
-    	also report the agent instruction files the refs in scope carry
-  -base ref
-    	only the commits the refs in scope add over this ref
-  -current-branch
-    	only the branch that is checked out, not every local branch and tag
-  -emdashes
-    	also report emdashes and endashes, and rewrite them, rather than leaving them alone
-  -exclude glob
-    	skip refs matching this glob (repeatable)
-  -exit-code
-    	exit 1 when anything is found, as git diff does
-  -identity identity
-    	identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
-  -push
-    	force push the rewritten refs (apply only)
-  -quiet
-    	print nothing unless a repository found something, for a scheduled run
-  -verbose
-    	report every commit rather than a summary
+Usage:
+  ai-attributions [flags]
+  ai-attributions [command]
+
+Available Commands:
+  apply       Rewrite the history, and push it where --push asks
+  backups     List the pre-rewrite refs saved by earlier runs
+  help        Help about any command
+  restore     Put the refs saved by one run back
+  scan        Report what would change, without changing it
+  version     Print the version
+
+Flags:
+  -h, --help   help for ai-attributions
+
+Use "ai-attributions [command] --help" for more information about a command.
+```
+
+Every flag belongs to the commands that use it, so `scan --help` and
+`apply --help` list them and `backups` takes none:
+
+```text
+Report the AI attributions in a repository's history, and, where the
+flags for them ask, its emdashes and endashes and the agent instruction
+files its refs carry. Nothing is rewritten: apply is the command that
+does that.
+
+repo-path defaults to the current directory; more than one path runs
+each in turn and summarizes them.
+
+Usage:
+  ai-attributions scan [repo-path...] [flags]
+
+Flags:
+      --agents-files        also report the agent instruction files the refs in scope carry
+      --base ref            only the commits the refs in scope add over this ref
+      --current-branch      only the branch that is checked out, not every local branch and tag
+      --emdashes            also report emdashes and endashes, and rewrite them, rather than leaving them alone
+      --exclude glob        skip refs matching this glob (repeatable)
+      --exit-code           exit 1 when anything is found, as git diff does
+  -h, --help                help for scan
+      --identity identity   identity to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)
+      --quiet               print nothing unless a repository found something, for a scheduled run
+      --verbose             report every commit rather than a summary
 ```
 
 ```bash

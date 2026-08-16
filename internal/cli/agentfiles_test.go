@@ -95,7 +95,7 @@ func TestAgentFilesAreReportedOnlyWhenAskedFor(t *testing.T) {
 	stage(t, repo, git, "Add the project", "AGENTS.md", "README.md")
 
 	quiet := captureReport(t, func() {
-		ended, err := runRepo(config{command: "scan"}, "", repo.Dir())
+		ended, err := runRepo(Config{Command: "scan"}, "", repo.Dir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestAgentFilesAreReportedOnlyWhenAskedFor(t *testing.T) {
 	}
 
 	asked := captureReport(t, func() {
-		ended, err := runRepo(config{command: "scan", agentsFiles: true}, "", repo.Dir())
+		ended, err := runRepo(Config{Command: "scan", AgentsFiles: true}, "", repo.Dir())
 		if err != nil {
 			t.Fatal(err)
 		}

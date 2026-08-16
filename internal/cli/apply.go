@@ -12,7 +12,7 @@ import (
 	"github.com/andornaut/ai-attributions/internal/rewrite"
 )
 
-func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, changes map[string]rewrite.Change) error {
+func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, changes map[string]rewrite.Change) error {
 	if err := checkRewritable(repo, cfg); err != nil {
 		return err
 	}
@@ -33,23 +33,23 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 	}
 	// Read before reporting, so what is named as unleased is what the push
 	// really cannot hold the remote to. Only a push uses the network.
-	if cfg.push {
-		if err := leaseRemote(repo, cfg.remote, publish); err != nil {
+	if cfg.Push {
+		if err := leaseRemote(repo, cfg.Remote, publish); err != nil {
 			return err
 		}
 	}
 	reportUnleased(publish)
 
-	if cfg.push {
-		sayf("\npushing to %s\n", cfg.remote)
-		if err := repo.Run(pushArgs(cfg.remote, publish)...); err != nil {
+	if cfg.Push {
+		sayf("\npushing to %s\n", cfg.Remote)
+		if err := repo.Run(pushArgs(cfg.Remote, publish)...); err != nil {
 			return err
 		}
-		reportDonef("the history is rewritten and pushed to %s", cfg.remote)
+		reportDonef("the history is rewritten and pushed to %s", cfg.Remote)
 		return nil
 	}
 	sayf("\nnot pushed. To publish the rewrite:\n\n    git %s\n",
-		strings.Join(pushArgs(cfg.remote, publish), " "))
+		strings.Join(pushArgs(cfg.Remote, publish), " "))
 	reportDonef("the history is rewritten here, and not pushed")
 	return nil
 }
@@ -59,7 +59,7 @@ func apply(repo *gitexec.Repo, cfg config, refs []string, carried []target, chan
 // gpgsig header, so handing it a ref rather than the range would give a signed
 // commit below the base a new hash and fork the branch from what it was
 // measured against.
-func refSpecs(cfg config, targets []target) []string {
+func refSpecs(cfg Config, targets []target) []string {
 	specs := make([]string, 0, len(targets))
 	for _, t := range targets {
 		specs = append(specs, rangeSpec(cfg, t.ref))
@@ -70,21 +70,21 @@ func refSpecs(cfg config, targets []target) []string {
 // rangeSpec names one ref's history, bounded by the base when there is one. The
 // rewrite and the count of what it moves ask this question, and answering it
 // twice would let them disagree about what the run covers.
-func rangeSpec(cfg config, ref string) string {
-	if cfg.base == "" {
+func rangeSpec(cfg Config, ref string) string {
+	if cfg.Base == "" {
 		return ref
 	}
-	return cfg.base + ".." + ref
+	return cfg.Base + ".." + ref
 }
 
-func checkRewritable(repo *gitexec.Repo, cfg config) error {
+func checkRewritable(repo *gitexec.Repo, cfg Config) error {
 	if err := rewrite.CheckAvailable(); err != nil {
 		return err
 	}
 	// Checked before the rewrite rather than after, so a missing remote does
 	// not leave a rewritten history with no way to publish it.
-	if cfg.push && !repo.HasRemote(cfg.remote) {
-		return fmt.Errorf("the repository has no remote named %q", cfg.remote)
+	if cfg.Push && !repo.HasRemote(cfg.Remote) {
+		return fmt.Errorf("the repository has no remote named %q", cfg.Remote)
 	}
 	isClean, err := repo.IsClean()
 	if err != nil {
@@ -99,7 +99,7 @@ func checkRewritable(repo *gitexec.Repo, cfg config) error {
 // collectTargets records where each ref pointed before the rewrite, along with
 // the remote value to hold the push lease against. Carried tags are backed up
 // with the refs in scope, so restore puts a repointed tag back too.
-func collectTargets(repo *gitexec.Repo, cfg config, refs []string, carried []target) ([]target, error) {
+func collectTargets(repo *gitexec.Repo, cfg Config, refs []string, carried []target) ([]target, error) {
 	stamp := time.Now().UTC().Format("20060102T150405Z")
 	targets := make([]target, 0, len(refs)+len(carried))
 	for _, ref := range refs {
@@ -113,7 +113,7 @@ func collectTargets(repo *gitexec.Repo, cfg config, refs []string, carried []tar
 			return nil, err
 		}
 		targets[i].hash = hash
-		targets[i].lease = leaseFor(repo, cfg.remote, t.ref)
+		targets[i].lease = leaseFor(repo, cfg.Remote, t.ref)
 
 		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(t.ref, "refs/")); err != nil {
 			return nil, err
