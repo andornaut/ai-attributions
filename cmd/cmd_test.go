@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // execute runs the root command as main does, and returns what it printed and
@@ -82,6 +84,35 @@ func TestArgs(t *testing.T) {
 				t.Errorf("Args(%q) = %q, want %q", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+// Every command cobra knows about is left alone, the ones it registers for
+// itself included. cobra adds help, completion and the shell-completion
+// requests inside Execute, which runs after Args, so a command missing from the
+// list Args reads is taken for a repo-path: shell completion would scan the
+// working directory on every press of TAB instead of answering.
+func TestArgsLeavesEveryCommandAlone(t *testing.T) {
+	registered := Cmd.Commands()
+	names := make([]string, 0, len(registered)+2)
+	names = append(names, cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd)
+	for _, c := range registered {
+		names = append(names, c.Name())
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			got := Args([]string{name})
+			if len(got) == 0 || got[0] != name {
+				t.Errorf("Args([%q]) = %q, want it left alone", name, got)
+			}
+		})
+	}
+	// The two cobra registers late are the ones worth naming: a list that has
+	// them only because this test ran Execute first would prove nothing.
+	for _, want := range []string{"help", "completion"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("%s is not registered before Args reads the command list", want)
+		}
 	}
 }
 

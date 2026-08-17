@@ -134,6 +134,13 @@ func init() {
 	// this tool has too few commands to spend a line on it.
 	Cmd.CompletionOptions.HiddenDefaultCmd = true
 	Cmd.AddCommand(scan, apply, backups, restore, version)
+	// Registered here rather than left to Execute, which is where cobra adds
+	// them: Args reads the command list before Execute runs, and a command
+	// missing from it is taken for a repo-path. Both are idempotent, so the
+	// call Execute makes later is a no-op. After AddCommand, because the
+	// completion command removes itself again when it would be the only one.
+	Cmd.InitDefaultHelpCmd()
+	Cmd.InitDefaultCompletionCmd()
 }
 
 // Args prepares a command line for cobra: it spells single-dash long flags the
@@ -172,15 +179,23 @@ func withDoubleDashes(args []string) []string {
 // did: anything that is not a command is a repo-path, and a flag reaches the
 // command that declares it.
 func withDefaultCommand(args []string) []string {
-	if len(args) > 0 {
-		switch args[0] {
-		case "-h", "--help", "help":
+	if len(args) == 0 {
+		return []string{scan.Name()}
+	}
+	switch args[0] {
+	// Flags of the root rather than commands, so they are not in the list below.
+	case "-h", "--help":
+		return args
+	// A shell asking what to complete. cobra registers these inside Execute,
+	// which is after this runs, so they are named here rather than found: a
+	// scan of the working directory on every press of TAB is what taking them
+	// for a path would mean.
+	case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return args
+	}
+	for _, c := range Cmd.Commands() {
+		if args[0] == c.Name() {
 			return args
-		}
-		for _, c := range Cmd.Commands() {
-			if args[0] == c.Name() {
-				return args
-			}
 		}
 	}
 	return append([]string{scan.Name()}, args...)
