@@ -48,7 +48,7 @@ func TestApplyReportsHowItEnded(t *testing.T) {
 			tt.setup(git)
 
 			report := capture(t, func() {
-				if _, err := runRepo(Config{Command: "apply"}, "", repo.Dir()); err != nil {
+				if _, err := runRepo(OpApply, Config{}, "", repo.Dir()); err != nil {
 					t.Fatal(err)
 				}
 			})

@@ -13,11 +13,11 @@ import (
 // that was.
 var cfg cli.Config
 
-// run is what every command that walks a repository does: name itself, take the
-// paths, and turn the status into the error cobra carries back to main.
-func run(c *cobra.Command, command string, stamp string, paths []string) error {
-	cfg.Command = command
-	status, err := cli.Execute(cfg, stamp, paths)
+// run is what every command that walks a repository does: say which work it
+// asks for, take the paths, and turn the status into the error cobra carries
+// back to main.
+func run(c *cobra.Command, op cli.Op, stamp string, paths []string) error {
+	status, err := cli.Execute(op, cfg, stamp, paths)
 	if err != nil {
 		return err
 	}
@@ -36,7 +36,7 @@ var scan = &cobra.Command{
 		"does that.\n\n" +
 		"repo-path defaults to the current directory; more than one path runs\n" +
 		"each in turn and summarizes them.",
-	RunE: func(c *cobra.Command, args []string) error { return run(c, "scan", "", args) },
+	RunE: func(c *cobra.Command, args []string) error { return run(c, cli.OpScan, "", args) },
 }
 
 var apply = &cobra.Command{
@@ -45,13 +45,13 @@ var apply = &cobra.Command{
 	Long: "Rewrite what scan reports: the attributions, and the dashes and\n" +
 		"instruction files the flags for them put in scope. Every ref it moves is\n" +
 		"saved beforehand, and the backups command lists what was saved.",
-	RunE: func(c *cobra.Command, args []string) error { return run(c, "apply", "", args) },
+	RunE: func(c *cobra.Command, args []string) error { return run(c, cli.OpApply, "", args) },
 }
 
 var backups = &cobra.Command{
 	Use:   "backups [repo-path...]",
 	Short: "List the pre-rewrite refs saved by earlier runs",
-	RunE:  func(c *cobra.Command, args []string) error { return run(c, "backups", "", args) },
+	RunE:  func(c *cobra.Command, args []string) error { return run(c, cli.OpBackups, "", args) },
 }
 
 var restore = &cobra.Command{
@@ -67,7 +67,7 @@ var restore = &cobra.Command{
 		}
 		return nil
 	},
-	RunE: func(c *cobra.Command, args []string) error { return run(c, "restore", args[0], args[1:]) },
+	RunE: func(c *cobra.Command, args []string) error { return run(c, cli.OpRestore, args[0], args[1:]) },
 }
 
 var version = &cobra.Command{

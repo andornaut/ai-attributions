@@ -45,8 +45,8 @@ func reportDonef(format string, args ...any) {
 
 // reportNothingToRewrite closes an apply that had nothing to do, so that every
 // apply that ran to the end says so, whether or not it changed anything.
-func reportNothingToRewrite(cfg Config) {
-	if cfg.applying() {
+func reportNothingToRewrite(op Op) {
+	if op.rewrites() {
 		reportDonef("nothing to rewrite")
 	}
 }

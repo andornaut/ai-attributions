@@ -33,11 +33,11 @@ func TestQuietPrintsOnlyWhatThereIsToAnswerFor(t *testing.T) {
 			repo, git := gitRepo(t)
 			git("commit", "--quiet", "--allow-empty", "--message="+tt.message)
 
-			cfg := Config{Command: "scan", Quiet: true, ExitCode: true}
+			cfg := Config{Quiet: true, ExitCode: true}
 			var status int
 			report := captureReport(t, func() {
 				var err error
-				if status, err = quietRepo(cfg, "", repo.Dir()); err != nil {
+				if status, err = quietRepo(OpScan, cfg, "", repo.Dir()); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -59,10 +59,10 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	git("commit", "--quiet", "--allow-empty",
 		"--message=Add a thing\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
 
-	loud := Config{Command: "scan", ExitCode: true}
+	loud := Config{ExitCode: true}
 	var want int
 	captureReport(t, func() {
-		found, err := runRepo(loud, "", repo.Dir())
+		found, err := runRepo(OpScan, loud, "", repo.Dir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	var got int
 	captureReport(t, func() {
 		var err error
-		if got, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if got, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -96,7 +96,7 @@ func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -127,7 +127,7 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(Config{Command: "scan", Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -140,7 +140,7 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 
 	repo = setup(t)
 	silent := captureReport(t, func() {
-		if _, err := quietRepo(Config{Command: "scan", Quiet: true}, "", repo.Dir()); err != nil {
+		if _, err := quietRepo(OpScan, Config{Quiet: true}, "", repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})

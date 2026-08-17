@@ -12,8 +12,8 @@ import (
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
-func scan(repo *gitexec.Repo, cfg Config) (outcome, error) {
-	who, err := targetIdentity(repo, cfg)
+func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
+	who, err := targetIdentity(repo, op, cfg)
 	if err != nil {
 		return outcomeClean, err
 	}
@@ -46,7 +46,7 @@ func scan(repo *gitexec.Repo, cfg Config) (outcome, error) {
 				strings.Join(refs, ", "), cfg.Base)
 		}
 		agents.report(cfg.Verbose)
-		reportNothingToRewrite(cfg)
+		reportNothingToRewrite(op)
 		return agents.outcome(), nil
 	}
 	// Trailers are the point of the tool. Emdashes and endashes are asked for,
@@ -75,10 +75,10 @@ func scan(repo *gitexec.Repo, cfg Config) (outcome, error) {
 	}
 
 	if found.flagged == 0 {
-		reportNothingToRewrite(cfg)
+		reportNothingToRewrite(op)
 		return agents.outcome(), nil
 	}
-	if !cfg.applying() {
+	if !op.rewrites() {
 		if len(found.changes) > 0 {
 			sayf("\nnothing was rewritten. Run apply to rewrite the history\n")
 		}
@@ -186,7 +186,7 @@ func targetRemote(repo *gitexec.Repo) string {
 // targetIdentity resolves who agent-authored commits are re-attributed to. A
 // bad --identity is always an error, but an unset git identity is only one when
 // there is a rewrite to do.
-func targetIdentity(repo *gitexec.Repo, cfg Config) (identity, error) {
+func targetIdentity(repo *gitexec.Repo, op Op, cfg Config) (identity, error) {
 	if cfg.Identity == identityNone {
 		return identity{}, nil
 	}
@@ -202,7 +202,7 @@ func targetIdentity(repo *gitexec.Repo, cfg Config) (identity, error) {
 
 	who := identity{name: repo.Config("user.name"), address: repo.Config("user.email"), enabled: true}
 	if !who.resolved() {
-		if cfg.applying() {
+		if op.rewrites() {
 			return identity{}, errors.New("the repository has no user.name and user.email to re-attribute to; pass --identity or --identity=none")
 		}
 		sayf("note: no user.name and user.email are set, so agent identities are reported but cannot be rewritten\n")

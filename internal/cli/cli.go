@@ -15,18 +15,18 @@ import (
 // with. stamp is the backup the restore command puts back, and is empty for
 // every other command. No path means the current directory, which is what makes
 // the tool answerable from inside a checkout with nothing to name.
-func Execute(cfg Config, stamp string, paths []string) (int, error) {
+func Execute(op Op, cfg Config, stamp string, paths []string) (int, error) {
 	if len(paths) == 0 {
 		paths = []string{"."}
 	}
 	if len(paths) > 1 {
-		return sweep(cfg, stamp, paths), nil
+		return sweep(op, cfg, stamp, paths), nil
 	}
 
 	if cfg.Quiet {
-		return quietRepo(cfg, stamp, paths[0])
+		return quietRepo(op, cfg, stamp, paths[0])
 	}
-	found, err := runRepo(cfg, stamp, paths[0])
+	found, err := runRepo(op, cfg, stamp, paths[0])
 	if err != nil {
 		return 0, err
 	}
@@ -52,11 +52,11 @@ func worthSaying(cfg Config, ended outcome, err error) bool {
 // quietRepo runs one repository with the report held in a buffer, and writes it
 // out only when there is something to answer for. A failure prints what the run
 // got as far as: a run that could not look is not a run that found nothing.
-func quietRepo(cfg Config, stamp, repoPath string) (int, error) {
+func quietRepo(op Op, cfg Config, stamp, repoPath string) (int, error) {
 	previous, saidBefore := out, said
 	buf := &bytes.Buffer{}
 	out, noteworthy = buf, false
-	found, err := runRepo(cfg, stamp, repoPath)
+	found, err := runRepo(op, cfg, stamp, repoPath)
 	out = previous
 
 	if worthSaying(cfg, found, err) {
@@ -75,7 +75,7 @@ func quietRepo(cfg Config, stamp, repoPath string) (int, error) {
 // runRepo does one repository's work and reports how it ended, leaving the exit
 // status to the caller, which is the only part that differs between a single
 // run and a sweep.
-func runRepo(cfg Config, stamp, repoPath string) (outcome, error) {
+func runRepo(op Op, cfg Config, stamp, repoPath string) (outcome, error) {
 	repo, err := gitexec.Open(repoPath)
 	if err != nil {
 		return outcomeClean, err
@@ -84,11 +84,13 @@ func runRepo(cfg Config, stamp, repoPath string) (outcome, error) {
 
 	// backups and restore only put back refs this tool saved, so they stay
 	// available whatever the repository is.
-	switch cfg.Command {
-	case "backups":
+	switch op {
+	case OpBackups:
 		return outcomeClean, listBackups(repo)
-	case "restore":
+	case OpRestore:
 		return outcomeClean, restoreBackup(repo, stamp)
+	case OpScan, OpApply:
+		// Handled below, once the fork check has had its say.
 	}
 
 	upstream, isFork, err := forkUpstream(repo, cfg.Remote)
@@ -97,19 +99,19 @@ func runRepo(cfg Config, stamp, repoPath string) (outcome, error) {
 	}
 	if isFork {
 		reportFork(repo, upstream)
-		if cfg.applying() {
+		if op.rewrites() {
 			reportDonef("nothing examined, a fork is not this repository's to rewrite")
 		}
 		return outcomeSkipped, nil
 	}
-	return scan(repo, cfg)
+	return scan(repo, op, cfg)
 }
 
 // sweep runs every path given and prints one line per repository, followed by
 // the full report for each one that found something. A repository that fails
 // does not end the sweep: the rest are still worth looking at, and a failure
 // nobody sees is the reason to keep going rather than stop.
-func sweep(cfg Config, stamp string, paths []string) int {
+func sweep(op Op, cfg Config, stamp string, paths []string) int {
 	type result struct {
 		path   string
 		report string
@@ -125,9 +127,9 @@ func sweep(cfg Config, stamp string, paths []string) int {
 		// summarize, and what they print is the whole point of running them, so
 		// it goes straight out under a heading instead of being weighed against
 		// an outcome none of them produce.
-		if !cfg.scanning() {
+		if !op.walksHistory() {
 			sayf("=== %s\n", repoPath)
-			if _, err := runRepo(cfg, stamp, repoPath); err != nil {
+			if _, err := runRepo(op, cfg, stamp, repoPath); err != nil {
 				failed = true
 				reportFailuref("%s: %v", repoPath, err)
 			}
@@ -138,7 +140,7 @@ func sweep(cfg Config, stamp string, paths []string) int {
 		// screen, which is what makes a sweep of many readable at all.
 		buf := &bytes.Buffer{}
 		out, noteworthy = buf, false
-		ended, err := runRepo(cfg, stamp, repoPath)
+		ended, err := runRepo(op, cfg, stamp, repoPath)
 		out = previous
 
 		// The line goes out as each repository finishes, rather than at the

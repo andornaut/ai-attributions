@@ -13,7 +13,6 @@ const (
 var stampRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
 type Config struct {
-	Command string
 	// AgentsFiles asks for the instruction files the refs in scope carry. Off
 	// by default, as --emdashes is: an agent instruction file is a contributor's
 	// business until a repository says otherwise, and a scan that reported one
@@ -38,13 +37,6 @@ type Config struct {
 	// origin.
 	Remote string
 }
-
-func (c Config) applying() bool { return c.Command == "apply" }
-
-// scanning reports whether the command walks the history looking for
-// attributions, which is what has a finding to report and a scope to report it
-// for. backups and restore only move refs this tool saved.
-func (c Config) scanning() bool { return c.Command == "scan" || c.applying() }
 
 // target is a ref to rewrite, the commit it pointed at beforehand, where it
 // ended up, and the value to expect on the remote when pushing. The lease is
@@ -83,3 +75,24 @@ func (i identity) String() string { return i.name + " <" + i.address + ">" }
 // resolved reports whether there is an identity to re-attribute to. Scanning
 // works without one.
 func (i identity) resolved() bool { return i.name != "" && i.address != "" }
+
+// An Op is the work a command asks of each repository. The command passes one
+// rather than naming itself, so a command that does not exist does not compile
+// and the run never compares a string to find out what it was asked for.
+type Op int
+
+const (
+	OpScan Op = iota
+	OpApply
+	OpBackups
+	OpRestore
+)
+
+// rewrites reports whether the op changes the history rather than reporting on
+// it, which is what decides whether a run closes by saying what it did.
+func (o Op) rewrites() bool { return o == OpApply }
+
+// walksHistory reports whether the op looks for attributions at all. backups
+// and restore only move refs this tool saved, so they have no finding to
+// summarize and no scope to report one for.
+func (o Op) walksHistory() bool { return o == OpScan || o == OpApply }
