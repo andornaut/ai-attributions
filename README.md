@@ -154,7 +154,7 @@ One becomes a hyphen, a run of them becomes one, and the spacing is left as it w
 
 Off unless `--agents-files` asks for it. The tip of every ref in scope is then checked for the files an agent reads its instructions from, and each counts toward `--exit-code` on its own. `--base` does not narrow this: the tip of a branch ships what it ships.
 
-```
+```text
 agent instruction files, counted by the refs in scope that carry them
      3  .cursor/rules
      3  AGENTS.md
