@@ -6,13 +6,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andornaut/ai-attributions/internal/cli"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // execute runs the root command as main does, and returns what it printed and
 // the error it ended with.
 func execute(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	// The flags write into one package-level Config that outlives an Execute,
+	// pflag holding pointers into it, so a value one test sets reaches the next
+	// unless it is cleared here. Zeroing the Config resets every value; the
+	// changed marks are cobra's own and are cleared beside them.
+	cfg = cli.Config{}
+	for _, c := range Cmd.Commands() {
+		c.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+	}
 	buf := &bytes.Buffer{}
 	Cmd.SetOut(buf)
 	Cmd.SetErr(buf)
