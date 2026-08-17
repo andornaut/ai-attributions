@@ -6,9 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andornaut/ai-attributions/internal/cli"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/andornaut/ai-attributions/internal/cli"
 )
 
 // execute runs the root command as main does, and returns what it printed and
