@@ -3,10 +3,6 @@ version: 2
 
 project_name: ai-attributions
 
-before:
-  hooks:
-    - go mod tidy
-
 # Linux only, which is what the release archives are installed on. The code is
 # built for unix generally, so adding darwin here is a one-line change.
 builds:
