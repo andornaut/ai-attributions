@@ -176,7 +176,7 @@ ai-attributions apply --base origin/main ~/src/example  # rewrite the commits th
 
 - `--base ref` narrows those refs to the commits they add over `ref`, leaving the rest out of the walk, the counts and `--exit-code`. A commit the base already carries keeps its message, identity and hash.
 - A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. A tag `--exclude` matched is repointed locally and left out of the push.
-- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`, so the line says the finding is on a branch the run did not answer for. Remote-tracking refs are read rather than the remote, so a ref is only as current as the last fetch. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
+- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`. Remote-tracking refs are read rather than the remote, so a ref is only as current as the last fetch, and `git fetch --prune` drops any whose branch is gone. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
 
 ## Forks
 
@@ -210,7 +210,7 @@ skipped      /home/andornaut/src/github.com/andornaut/qmk_firmware
 no AI attributions in 160 commits, across refs/heads/main
 
 not in scope, and not counted above: remote branches carrying AI attributions
-     3 of 3 commits  refs/remotes/origin/claude/test-review-cleanup
+     3 of 3 commits  refs/remotes/origin/agent-work
 ```
 
 Each word names a different thing to go and do.
@@ -218,7 +218,7 @@ Each word names a different thing to go and do.
 Word | Meaning | Status
 --- | --- | ---
 `clean` | nothing to do | 0
-`found` | attributions on the refs in scope, which `apply` rewrites, or an agent instruction file, which nothing here does | 1
+`found` | attributions on the refs in scope, or an agent instruction file | 1
 `rewrote` | an `apply` gave a ref a new hash, so this repository's history has changed | 1
 `out of scope` | a finding on a ref the run did not answer for, a remote branch for instance | 0
 `skipped` | a fork, whose history is not this repository's to rewrite | 3
@@ -234,7 +234,7 @@ Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw,
 0 4 * * * ai-attributions scan --quiet ~/src/github.com/andornaut/*
 ```
 
-A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`, whose finding is counted in no status and would otherwise be the one `--quiet` dropped. `--quiet` decides what is written, not what is reported, and `backups` and `restore` reject it.
+A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`: its finding moves no status, so weighing the report by one would drop it. `--quiet` decides what is written, not what is reported, and `backups` and `restore` reject it.
 
 ## GitHub Action
 
@@ -312,12 +312,10 @@ make test           # go test ./...
 make coverage       # the suite under -race, then the per-function report
 make lint           # the golangci-lint run CI does, and make fmt applies
 make build          # a stripped static binary at bin/ai-attributions
-make release VERSION=1.3.4
+make release VERSION=1.3.4  # bump action.yml's version default, tag, push both
 ```
 
-CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it.
-
-`make release` is the tag and the `action.yml` edit that has to ride with it, in one command: the `version` default names the release it was cut with, so an edit that misses the tagged commit leaves `@v1` running this release's action against the previous release's binary. The release workflow checks the two agree before publishing, for a tag cut by hand.
+CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it. The release refuses a tag whose `action.yml` names a different version, which is what `make release` keeps together.
 
 Package | Role
 --- | ---
