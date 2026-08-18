@@ -156,6 +156,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # action.yml's version default names the release it was cut with, which is
+      # what makes @v1 move the binary and the action together. The bump is a
+      # hand edit in the commit being tagged, so a release that skipped it
+      # publishes a binary nothing installs and leaves @v1 running one action
+      # against another's binary. Checked before anything is published, so a tag
+      # that forgot it fails rather than shipping.
+      - name: The version default must name this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Scoped to the version input: every other input has a default too,
+          # and the first one in the file is not this one.
+          default=$(awk '/^  version:/{f=1} f && /^    default:/{print $2; exit}' action.yml)
+          if [ "$default" != "$TAG" ]; then
+            echo "::error::action.yml installs $default, but this tag is $TAG"
+            exit 1
+          fi
+
       - name: Set up Go
         uses: actions/setup-go@v7.0.0
         with:
