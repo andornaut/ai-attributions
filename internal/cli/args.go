@@ -5,7 +5,6 @@ package cli
 import (
 	"fmt"
 	"path"
-	"runtime/debug"
 	"strings"
 )
 
@@ -15,13 +14,6 @@ type refPatterns []string
 func (p *refPatterns) String() string { return strings.Join(*p, ",") }
 
 func (p *refPatterns) Set(v string) error { *p = append(*p, v); return nil }
-
-func version() string {
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
-		return info.Main.Version
-	}
-	return "devel"
-}
 
 // matches tests each pattern against the full ref and its short forms, so
 // --exclude dev covers refs/tags/dev and --exclude agent-work covers

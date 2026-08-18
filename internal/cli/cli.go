@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/andornaut/ai-attributions/internal/gitexec"
+	"github.com/andornaut/ai-attributions/internal/version"
 )
 
 // Execute runs cfg against every path given and returns the status to exit
@@ -33,9 +34,9 @@ func Execute(op Op, cfg Config, stamp string, paths []string) (int, error) {
 	return found.status(cfg), nil
 }
 
-// Version is the release this binary was built from, or "devel" for one built
+// Version is the release this binary was built from, or "dev" for one built
 // any other way.
-func Version() string { return version() }
+func Version() string { return version.Version }
 
 // ValidStamp reports whether s names a backup the way restore expects, which is
 // what the timestamp in a `backups` listing looks like.
