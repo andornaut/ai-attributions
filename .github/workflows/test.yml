@@ -46,6 +46,10 @@ jobs:
           # Nothing in this job uses the token, so it is not left
           # in .git/config for a later step to read.
           persist-credentials: false
+          # The scan at the end of this job reads the commits the branch added,
+          # so the whole history has to be on disk. The Go suite needs only the
+          # tree, and would take the default depth of one.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7.0.0
@@ -78,25 +82,12 @@ jobs:
           name: coverage
           path: coverage.txt
 
-  # The action as another repository consumes it: action.yml driving a real
-  # binary over real history, which the Go suite above cannot reach. Its own job
-  # rather than a step in Test, because it needs the full history the scan reads
-  # and the suite does not.
-  action:
-    name: Action
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7.0.1
-        with:
-          # Nothing in this job uses the token, so it is not left
-          # in .git/config for a later step to read.
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Scan the branch
+      # The action as another repository consumes it: action.yml driving a real
+      # binary over the history the branch added, which the Go suite cannot
+      # reach. A step in this job rather than one of its own, so the Test check
+      # that already guards main covers it, with no second name for the ruleset
+      # to have to carry.
+      - name: Scan the branch with the action in this repository
         uses: ./
         with:
           # The rolling build, not the release action.yml defaults to: this
