@@ -1,9 +1,7 @@
 name: AI attributions
 
 # Every branch, not just pull requests: work lands on main directly as often as
-# it arrives through one. A push to main re-cuts the release this action
-# installs, so a run here installs the previous one, which is the build every
-# other repository is running anyway.
+# it arrives through one.
 on:
   push:
     branches: ["**"]
@@ -48,19 +46,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # The action in this repository, installing the binary a release built.
-      # What another repository gets from andornaut/ai-attributions, checked
-      # here against a real pull request rather than only in tests.
-      - name: Scan the branch
-        uses: ./
+      # Scans what the push or the pull request added, not the history it
+      # arrived on, and fails with the commands to take an attribution back off.
+      - name: Scan for AI attributions
+        uses: andornaut/ai-attributions@v1
         with:
-          # The rolling build, not the release action.yml defaults to: this
-          # repository is where that default gets bumped, and a bump names a
-          # release that is published after the commit making it.
-          version: dev
-          # This repository holds itself to both, so its own history is what the
-          # action asks other repositories for. Each needs a binary carrying the
-          # flag behind it, and dev is re-cut from main: a branch that adds one
-          # of these flags scans red until the change it makes lands.
-          emdashes: true
+          # Agent instruction files are local-only, so a branch that ships one
+          # fails here rather than waiting for a nightly sweep to notice.
           agents-files: true
+          # An emdash or an endash is house style rather than an ad, so a
+          # message carrying one fails beside the attributions instead of being
+          # left alone.
+          emdashes: true

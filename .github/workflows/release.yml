@@ -33,32 +33,12 @@ concurrency:
 jobs:
   # Publishing waits on the scan as well: a release is a durable artifact, and
   # taking an attribution back off after one is cut means rewriting history that
-  # has already been published. Run only where a release can follow, since the
-  # scan workflow already runs on every push and pull request of its own accord.
+  # has already been published. Called only where a release can follow, since
+  # the scan workflow already runs on every push and pull request of its own
+  # accord.
   attributions:
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    # Capped well under the six-hour default: nothing here runs longer than
-    # six minutes, so a job still going at fifteen has hung rather than failed.
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7.0.1
-        with:
-          # Nothing in this job uses the token, so it is not left
-          # in .git/config for a later step to read.
-          persist-credentials: false
-          fetch-depth: 0
-
-      # The published action, the same one every other repository runs, and not
-      # `./`: a tagged commit names its own release in action.yml, so the
-      # checkout here would install a version that this run has not published
-      # yet. `@v1` names the last release either way, which is already on disk
-      # and cannot be moved. The scan workflow still runs `./` against `dev`, so
-      # a change to either half is exercised on every push regardless.
-      - name: Scan the branch
-        uses: andornaut/ai-attributions@v1
+    uses: ./.github/workflows/ai-attributions.yml
 
   # Publishing waits on the same suite that guards main, rather than on the
   # build alone: something that compiles everywhere still ships whatever the

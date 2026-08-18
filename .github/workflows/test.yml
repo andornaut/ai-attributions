@@ -78,6 +78,36 @@ jobs:
           name: coverage
           path: coverage.txt
 
+  # The action as another repository consumes it: action.yml driving a real
+  # binary over real history, which the Go suite above cannot reach. Its own job
+  # rather than a step in Test, because it needs the full history the scan reads
+  # and the suite does not.
+  action:
+    name: Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+        with:
+          # Nothing in this job uses the token, so it is not left
+          # in .git/config for a later step to read.
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Scan the branch
+        uses: ./
+        with:
+          # The rolling build, not the release action.yml defaults to: this
+          # repository is where that default gets bumped, and a bump names a
+          # release that is published after the commit making it. dev is re-cut
+          # from every push to main, so a branch that adds a flag scans red here
+          # until the change it makes lands.
+          version: dev
+          emdashes: true
+          agents-files: true
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
