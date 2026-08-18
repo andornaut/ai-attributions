@@ -93,35 +93,13 @@ jobs:
         uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.10.1
-          # Verified in the step below instead, which can ask again. The
-          # action's own verify fetches a JSONSchema from golangci-lint.run
-          # once, so a slow host fails the job with nothing wrong in the config.
-          verify: false
-
-      # `run` above accepts an unknown key inside `linters.settings` and exits
-      # 0, which leaves that setting disabled while CI stays green, so this is
-      # what rejects a misspelled one. An unknown linter name is caught either
-      # way. It runs after the linters rather than before them, as `make lint`
-      # does, because the binary is only on PATH once the step above installed
-      # it; either order fails the job.
-      - name: Verify the golangci config
-        run: |
-          for attempt in 1 2 3; do
-            output=$(golangci-lint config verify 2>&1) && exit 0
-            # A config the schema rejects fails the same way every time, so only
-            # a schema that never arrived is worth asking again for.
-            case $output in
-              *"compile schema"* | *"context deadline exceeded"*) ;;
-              *)
-                printf '%s\n' "$output"
-                exit 1
-                ;;
-            esac
-            echo "::warning::the config schema did not arrive (attempt $attempt)"
-            sleep $((attempt * 5))
-          done
-          printf '%s\n' "$output"
-          exit 1
+          # Verification fetches a JSONSchema from golangci-lint.run on every
+          # run, so this step depends on that host being reachable. Kept on
+          # regardless: `run` accepts an unknown key inside `linters.settings`
+          # and exits 0, which leaves that setting disabled while CI stays
+          # green, and only `config verify` rejects it. An unknown linter name
+          # is caught either way.
+          verify: true
 
       # The action bundles markdownlint-cli2, so its own tag is the tool pin and
       # Dependabot proposes the bump through the github-actions ecosystem. It
