@@ -312,9 +312,12 @@ make test           # go test ./...
 make coverage       # the suite under -race, then the per-function report
 make lint           # the golangci-lint run CI does, and make fmt applies
 make build          # a stripped static binary at bin/ai-attributions
+make release VERSION=1.3.4
 ```
 
 CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it.
+
+`make release` is the tag and the `action.yml` edit that has to ride with it, in one command: the `version` default names the release it was cut with, so an edit that misses the tagged commit leaves `@v1` running this release's action against the previous release's binary. The release workflow checks the two agree before publishing, for a tag cut by hand.
 
 Package | Role
 --- | ---
