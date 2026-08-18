@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A stream that is not a terminal gets the report as plain text, so a redirect
 // or a CI log carries no escape codes.
@@ -17,12 +20,25 @@ func TestPaint(t *testing.T) {
 // counts toward a printf width and would knock the paths that follow out of
 // line.
 func TestColumnPadsBeforeColoring(t *testing.T) {
-	want := green + "clean   " + reset
-	if got := column(true, green, "clean"); got != want {
-		t.Errorf("column() = %q, want %q", got, want)
+	padded := "clean" + strings.Repeat(" ", outcomeWidth-len("clean"))
+	if got := column(true, green, "clean"); got != green+padded+reset {
+		t.Errorf("column() = %q, want %q", got, green+padded+reset)
 	}
-	if got := column(false, green, "clean"); got != "clean   " {
+	if got := column(false, green, "clean"); got != padded {
 		t.Errorf("column() = %q, want the padding without color", got)
+	}
+}
+
+// The column is as wide as the longest word that can appear in it, so a word
+// added later lines up with the rest rather than pushing its path along.
+func TestColumnFitsEveryOutcome(t *testing.T) {
+	for _, o := range outcomes() {
+		if got := column(false, green, o.String()); len(got) != outcomeWidth {
+			t.Errorf("column(%s) is %d wide, want %d", o, len(got), outcomeWidth)
+		}
+	}
+	if got := column(false, green, "failed"); len(got) != outcomeWidth {
+		t.Errorf("column(failed) is %d wide, want %d", len(got), outcomeWidth)
 	}
 }
 
@@ -30,7 +46,7 @@ func TestColumnPadsBeforeColoring(t *testing.T) {
 // which repositories need attention without being read.
 func TestOutcomeColors(t *testing.T) {
 	seen := map[string]outcome{}
-	for _, o := range []outcome{outcomeClean, outcomeFound, outcomeSkipped} {
+	for _, o := range outcomes() {
 		color := o.color()
 		if color == "" {
 			t.Errorf("outcome(%s).color() is empty", o)

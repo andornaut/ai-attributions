@@ -326,14 +326,16 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 // covered by the refs in scope, rather than rewriting refs the tool was not
 // pointed at. It reads remote-tracking refs, so a scan needs no network.
 // Nothing it finds counts toward the run's findings or its exit code, which
-// answer for the refs in scope, the same set apply rewrites.
-func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who identity, localRefs []string) error {
+// answer for the refs in scope, the same set apply rewrites. It reports whether
+// it named anything, which is what the run ends on when the refs in scope had
+// nothing to say.
+func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who identity, localRefs []string) (bool, error) {
 	if !repo.HasRemote(cfg.Remote) {
-		return nil
+		return false, nil
 	}
 	remoteRefs, err := repo.RemoteRefs(cfg.Remote)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// A ref left behind by this tool's own rewrite is separated out below, so
@@ -345,7 +347,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 	for _, ref := range remoteRefs {
 		excluded, err := cfg.Exclude.matches(ref)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if excluded {
 			continue
@@ -371,20 +373,18 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 		}
 	}
 
-	// Both blocks below name work that is still to do and move no status, the
-	// refs in scope being what the status answers for. Marking them keeps
-	// --quiet from weighing this report by an outcome it never produces.
+	// Both blocks below name work that is still to do on a ref that was not in
+	// scope, so neither moves the status. Reporting that they said something is
+	// what keeps a sweep from printing "clean" over the only finding a run has.
 	if len(stale) > 0 {
-		noteworthy = true
 		sayf("\nnaming history this repository has already rewritten locally: %s\n",
 			strings.Join(stale, ", "))
 		sayf("pushing the rewrite settles these; until then the remote still holds what it started from\n")
 	}
 	if len(lines) == 0 {
-		return nil
+		return len(stale) > 0, nil
 	}
 
-	noteworthy = true
 	sayf("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
 	for _, line := range lines {
 		sayf("%s\n", line)
@@ -393,7 +393,7 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 	// The cause is not knowable without the network, and a scan does not use
 	// it, so the mechanism is stated rather than one guess at which it is.
 	sayf("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
-	return nil
+	return true, nil
 }
 
 // rewrittenHere returns the branches this tool has rewritten, each keyed with

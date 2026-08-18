@@ -176,7 +176,7 @@ ai-attributions apply --base origin/main ~/src/example  # rewrite the commits th
 
 - `--base ref` narrows those refs to the commits they add over `ref`, leaving the rest out of the walk, the counts and `--exit-code`. A commit the base already carries keeps its message, identity and hash.
 - A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. A tag `--exclude` matched is repointed locally and left out of the push.
-- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. Remote-tracking refs are read rather than the remote, so a ref is only as current as the last fetch. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
+- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`, so the line says the finding is on a branch the run did not answer for. Remote-tracking refs are read rather than the remote, so a ref is only as current as the last fetch. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
 
 ## Forks
 
@@ -194,29 +194,47 @@ Nothing is reported, and under `--exit-code` the status is 3 rather than 0. `bac
 
 ## Sweeping several repositories
 
-More than one `repo-path` prints a line per repository as it finishes, then the full report for each one that found something. A repository that fails does not end the sweep, and its failure goes to stderr.
+More than one `repo-path` prints a line per repository as it finishes, then the full report for each one with something to say. A repository that fails does not end the sweep, and its failure goes to stderr.
 
 ```console
 $ ai-attributions ~/src/github.com/andornaut/*
-clean    /home/andornaut/src/github.com/andornaut/gog
-found    /home/andornaut/src/github.com/andornaut/cloudflare-starter
-skipped  /home/andornaut/src/github.com/andornaut/qmk_firmware
+clean        /home/andornaut/src/github.com/andornaut/gog
+found        /home/andornaut/src/github.com/andornaut/cloudflare-starter
+out of scope /home/andornaut/src/github.com/andornaut/mrs
+skipped      /home/andornaut/src/github.com/andornaut/qmk_firmware
 
 === /home/andornaut/src/github.com/andornaut/cloudflare-starter
 2 of 5 commits carry AI attributions, across refs/heads/main
+
+=== /home/andornaut/src/github.com/andornaut/mrs
+no AI attributions in 160 commits, across refs/heads/main
+
+not in scope, and not counted above: remote branches carrying AI attributions
+     3 of 3 commits  refs/remotes/origin/claude/test-review-cleanup
 ```
 
-The status is the worst of what the sweep saw, whatever order the paths came in: 2 if any failed, then 1 if any found something, then 3 if any was skipped. `backups` and `restore` have no finding to summarize, so they print under the `=== <path>` heading only.
+Each word names a different thing to go and do.
+
+Word | Meaning | Status
+--- | --- | ---
+`clean` | nothing to do | 0
+`found` | attributions on the refs in scope, which `apply` rewrites, or an agent instruction file, which nothing here does | 1
+`rewrote` | an `apply` gave a ref a new hash, so this repository's history has changed | 1
+`out of scope` | a finding on a ref the run did not answer for, a remote branch for instance | 0
+`skipped` | a fork, whose history is not this repository's to rewrite | 3
+`failed` | the run could not finish, and the error is on stderr | 2
+
+Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw, whatever order the paths came in. `backups` and `restore` have no finding to summarize, so they print under the `=== <path>` heading only.
 
 ## Quiet runs
 
-`--quiet` prints the report only for a repository that found something, so a sweep of thirty clean checkouts writes nothing and exits 0.
+`--quiet` prints the line and the report only for a repository with something to answer for, so a sweep of thirty clean checkouts writes nothing and exits 0.
 
 ```bash
 0 4 * * * ai-attributions scan --quiet ~/src/github.com/andornaut/*
 ```
 
-A fork counts as nothing to answer for. A failure always prints, as does a remote branch carrying attributions, which is counted in no status and would otherwise be the one finding `--quiet` dropped. `--quiet` decides what is written, not what is reported, and `backups` and `restore` reject it.
+A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`, whose finding is counted in no status and would otherwise be the one `--quiet` dropped. `--quiet` decides what is written, not what is reported, and `backups` and `restore` reject it.
 
 ## GitHub Action
 

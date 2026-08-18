@@ -81,17 +81,25 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 	}
 }
 
-// A remote branch carrying attributions is counted in no status, the refs in
-// scope being what the status answers for. --quiet weighing the report by its
-// outcome would drop the finding entirely, which is the one thing a scheduled
-// sweep exists to surface.
-func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
+// remoteOnlyRepo is a repository whose refs in scope are clean and whose remote
+// carries a branch with an attribution on it.
+func remoteOnlyRepo(t *testing.T) *gitexec.Repo {
+	t.Helper()
 	repo, git := gitRepo(t)
 	git("remote", "add", "origin", "https://github.com/example/thing.git")
 	git("commit", "--quiet", "--allow-empty",
 		"--message=Branch work\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
 	git("update-ref", "refs/remotes/origin/feature", "HEAD")
 	git("reset", "--quiet", "--hard", "HEAD~1")
+	return repo
+}
+
+// A remote branch carrying attributions is counted in no status, the refs in
+// scope being what the status answers for. --quiet weighing the report by its
+// outcome would drop the finding entirely, which is the one thing a scheduled
+// sweep exists to surface.
+func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
+	repo := remoteOnlyRepo(t)
 
 	var status int
 	report := captureReport(t, func() {
@@ -146,5 +154,32 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 	})
 	if silent != "" {
 		t.Errorf("a fork spoke with no status to explain:\n%s", silent)
+	}
+}
+
+// A sweep answers for each repository in one line, and a finding on a ref that
+// was out of scope has to say so there: an outcome it moves no status for would
+// otherwise print "clean" over the only finding the run has, and take the
+// report naming the branch down with it.
+func TestSweepNamesAFindingOutOfScope(t *testing.T) {
+	tidy, _ := gitRepo(t)
+	elsewhere := remoteOnlyRepo(t)
+
+	var status int
+	report := captureReport(t, func() {
+		status = sweep(OpScan, Config{Quiet: true}, "", []string{tidy.Dir(), elsewhere.Dir()})
+	})
+
+	if !strings.Contains(report, "out of scope "+elsewhere.Dir()) {
+		t.Errorf("the sweep did not name the repository as one carrying a finding out of scope:\n%s", report)
+	}
+	if !strings.Contains(report, "refs/remotes/origin/feature") {
+		t.Errorf("the sweep printed the line and dropped the report naming the branch:\n%s", report)
+	}
+	if strings.Contains(report, tidy.Dir()) {
+		t.Errorf("--quiet named a repository with nothing to answer for:\n%s", report)
+	}
+	if status != 0 {
+		t.Errorf("a finding on a ref out of scope exited %d, want 0", status)
 	}
 }

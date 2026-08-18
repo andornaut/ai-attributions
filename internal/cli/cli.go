@@ -42,11 +42,23 @@ func Version() string { return version() }
 func ValidStamp(s string) bool { return stampRe.MatchString(strings.Trim(s, "/")) }
 
 // worthSaying reports whether a --quiet run has to print what it buffered. A
-// finding and a failure are the obvious two. The third is a status the caller
-// will read: a non-zero exit with nothing above it names no repository and no
+// finding and a failure are the obvious two, and a rewrite is the third:
+// history that has changed is reported whether or not a status was asked for.
+// The fourth is a finding on a ref that was out of scope, which moves no status
+// and would otherwise be weighed by one. The last is a status the caller will
+// read: a non-zero exit with nothing above it names no repository and no
 // reason, which is the one answer a scheduled run cannot act on.
 func worthSaying(cfg Config, ended outcome, err error) bool {
-	return err != nil || ended == outcomeFound || noteworthy || ended.status(cfg) != 0
+	if err != nil || ended.status(cfg) != 0 {
+		return true
+	}
+	switch ended {
+	case outcomeFound, outcomeRewrote, outcomeOutOfScope:
+		return true
+	case outcomeClean, outcomeSkipped:
+		return false
+	}
+	return false
 }
 
 // quietRepo runs one repository with the report held in a buffer, and writes it
@@ -55,7 +67,7 @@ func worthSaying(cfg Config, ended outcome, err error) bool {
 func quietRepo(op Op, cfg Config, stamp, repoPath string) (int, error) {
 	previous, saidBefore := out, said
 	buf := &bytes.Buffer{}
-	out, noteworthy = buf, false
+	out = buf
 	found, err := runRepo(op, cfg, stamp, repoPath)
 	out = previous
 
@@ -139,7 +151,7 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 		// Buffered so that a clean repository costs one line rather than a
 		// screen, which is what makes a sweep of many readable at all.
 		buf := &bytes.Buffer{}
-		out, noteworthy = buf, false
+		out = buf
 		ended, err := runRepo(op, cfg, stamp, repoPath)
 		out = previous
 
@@ -166,13 +178,15 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 			sayf("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		}
 		switch ended {
-		case outcomeFound:
+		case outcomeFound, outcomeRewrote:
 			found = true
 		case outcomeSkipped:
 			skipped = true
-		case outcomeClean:
+		case outcomeClean, outcomeOutOfScope:
 			// Neither flag: a clean repository is what the exit status reports
-			// when nothing else happened.
+			// when nothing else happened, and a finding on a ref that was out
+			// of scope is named in the report rather than counted in the
+			// status.
 		}
 		if ended != outcomeClean && speak {
 			reports = append(reports, result{path: repoPath, report: buf.String()})

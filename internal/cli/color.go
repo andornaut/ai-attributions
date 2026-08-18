@@ -8,11 +8,13 @@ import (
 // The report is a wall of lowercase prose, where the line saying a run stopped
 // early reads like the lines saying what it found. These mark how a run ended.
 const (
-	red    = "\x1b[31m"
-	green  = "\x1b[32m"
-	yellow = "\x1b[33m"
-	blue   = "\x1b[34m"
-	reset  = "\x1b[0m"
+	red     = "\x1b[31m"
+	green   = "\x1b[32m"
+	yellow  = "\x1b[33m"
+	blue    = "\x1b[34m"
+	magenta = "\x1b[35m"
+	cyan    = "\x1b[36m"
+	reset   = "\x1b[0m"
 )
 
 // colorOut and colorErr are decided once per stream, so that a report that is
@@ -57,9 +59,26 @@ func paint(enabled bool, color, text string) string {
 	return color + text + reset
 }
 
-// column pads a sweep's outcome to a fixed width, then colors it. An escape
+// outcomeWidth is the width of a sweep's first column, taken from the longest
+// word that can appear in it rather than written down, so that adding a word
+// cannot knock the paths out of line.
+var outcomeWidth = widestOutcome()
+
+func widestOutcome() int {
+	// failed is not an outcome: it is a run that could not finish one. It
+	// prints in the same column all the same.
+	widest := len("failed")
+	for _, o := range outcomes() {
+		if width := len(o.String()); width > widest {
+			widest = width
+		}
+	}
+	return widest
+}
+
+// column pads a sweep's outcome to the column width, then colors it. An escape
 // code counts toward a printf width, so coloring first would knock the paths
 // that follow out of line.
 func column(enabled bool, color, text string) string {
-	return paint(enabled, color, fmt.Sprintf("%-8s", text))
+	return paint(enabled, color, fmt.Sprintf("%-*s", outcomeWidth, text))
 }

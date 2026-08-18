@@ -21,13 +21,6 @@ var out io.Writer = os.Stdout
 // nothing above it does not open the output with a blank line.
 var said bool
 
-// noteworthy records whether the report holds something a scheduled run has to
-// see, which the outcome cannot answer on its own: a remote branch carrying
-// attributions is worth naming and moves no status, the refs in scope being
-// what the status answers for. Without this, --quiet weighs a report by its
-// outcome and drops the one finding that has none.
-var noteworthy bool
-
 // say writes one piece of the report. The write error is dropped: a report that
 // cannot reach a closed stdout is not a reason to fail a rewrite that worked,
 // and every caller would otherwise carry a check it has no answer for.
@@ -66,21 +59,43 @@ func reportFailuref(format string, args ...any) {
 }
 
 // outcome is how one repository's run ended. It is what a sweep lists per
-// repository, and what the exit status is reduced from. A repository the run
-// declined to examine is deliberately not clean: reporting "I did not look" as
-// "nothing to find" is the one answer a sweep must not give.
+// repository, and what the exit status is reduced from. Each word names a
+// different thing to go and do, which is what a sweep of thirty is read for:
+//
+//	clean         nothing to do
+//	found         attributions on the refs in scope, so apply rewrites them
+//	rewrote       an apply moved a ref, so this repository's history has changed
+//	out of scope  a finding on a ref the run did not answer for
+//	skipped       a fork, which is nobody's to rewrite here
+//
+// A repository the run declined to examine is deliberately not clean: reporting
+// "I did not look" as "nothing to find" is the one answer a sweep must not
+// give. Neither is one whose only finding sits on a ref that was out of scope,
+// which no status can carry and the line has to name.
 type outcome int
 
 const (
 	outcomeClean outcome = iota
 	outcomeFound
+	outcomeRewrote
+	outcomeOutOfScope
 	outcomeSkipped
 )
+
+// outcomes is every word a sweep can print in its first column, which is what
+// the column is sized from.
+func outcomes() []outcome {
+	return []outcome{outcomeClean, outcomeFound, outcomeRewrote, outcomeOutOfScope, outcomeSkipped}
+}
 
 func (o outcome) String() string {
 	switch o {
 	case outcomeFound:
 		return "found"
+	case outcomeRewrote:
+		return "rewrote"
+	case outcomeOutOfScope:
+		return "out of scope"
 	case outcomeSkipped:
 		return "skipped"
 	default:
@@ -88,12 +103,15 @@ func (o outcome) String() string {
 	}
 }
 
-// color marks what a sweep's line means without reading it: nothing to do,
-// something found, or a repository that was not examined.
+// color marks what a sweep's line means without reading it.
 func (o outcome) color() string {
 	switch o {
 	case outcomeFound:
 		return yellow
+	case outcomeRewrote:
+		return cyan
+	case outcomeOutOfScope:
+		return magenta
 	case outcomeSkipped:
 		return blue
 	default:
@@ -109,11 +127,15 @@ func (o outcome) status(cfg Config) int {
 		return 0
 	}
 	switch o {
-	case outcomeFound:
+	case outcomeFound, outcomeRewrote:
 		return 1
 	case outcomeSkipped:
 		return 3
 	default:
+		// outcomeOutOfScope is here with outcomeClean: a ref the run did not
+		// answer for cannot move the status, which reports on the refs in
+		// scope, the same set apply rewrites. It is named in the report and in
+		// the sweep's line instead.
 		return 0
 	}
 }

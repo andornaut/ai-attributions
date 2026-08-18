@@ -68,15 +68,24 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	reportCarried(carried)
 	// A remote branch sits outside a range rather than beside it, so a run
 	// given a base does not measure one against it.
+	var outOfScope bool
 	if cfg.Base == "" {
-		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+		outOfScope, err = reportRemoteOnly(repo, cfg, opts, who, refs)
+		if err != nil {
 			return outcomeClean, err
 		}
 	}
 
 	if found.flagged == 0 {
 		reportNothingToRewrite(op)
-		return agents.outcome(), nil
+		ended := agents.outcome()
+		// Nothing on the refs in scope, and a ref out of scope carrying
+		// something: the run ends on that rather than on clean, so a sweep's
+		// line names the repository and prints the report under it.
+		if ended == outcomeClean && outOfScope {
+			ended = outcomeOutOfScope
+		}
+		return ended, nil
 	}
 	if !op.rewrites() {
 		if len(found.changes) > 0 {
@@ -86,8 +95,14 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	}
 	// A rewrite that succeeded still reports what it found, so that a job can
 	// tell a run that had to change something from one that had nothing to do.
-	if err := apply(repo, cfg, refs, carried, found.changes); err != nil {
+	// A finding the rewrite does not touch, an agent instruction file, leaves
+	// the history where it was and stays found.
+	rewrote, err := apply(repo, cfg, refs, carried, found.changes)
+	if err != nil {
 		return outcomeClean, err
+	}
+	if rewrote {
+		return outcomeRewrote, nil
 	}
 	return outcomeFound, nil
 }

@@ -12,30 +12,34 @@ import (
 	"github.com/andornaut/ai-attributions/internal/rewrite"
 )
 
-func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, changes map[string]rewrite.Change) error {
+// apply rewrites the refs in scope and reports whether any of them moved, which
+// is what separates a repository whose history has changed from one that had a
+// finding the rewrite does not touch.
+func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, changes map[string]rewrite.Change) (bool, error) {
 	if err := checkRewritable(repo, cfg); err != nil {
-		return err
+		return false, err
 	}
 	targets, err := collectTargets(repo, cfg, refs, carried)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := rewrite.Run(repo, refSpecs(cfg, targets), changes); err != nil {
-		return err
+		return false, err
 	}
 	resolveRewritten(repo, targets)
 	reportRewritten(targets)
+	moved := anyMoved(targets)
 
 	publish := publishable(targets)
 	if len(publish) == 0 {
 		reportDonef("no ref moved, so there is nothing to push")
-		return nil
+		return moved, nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
 	// really cannot hold the remote to. Only a push uses the network.
 	if cfg.Push {
 		if err := leaseRemote(repo, cfg.Remote, publish); err != nil {
-			return err
+			return moved, err
 		}
 	}
 	reportUnleased(publish)
@@ -43,15 +47,15 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 	if cfg.Push {
 		sayf("\npushing to %s\n", cfg.Remote)
 		if err := repo.Run(pushArgs(cfg.Remote, publish)...); err != nil {
-			return err
+			return moved, err
 		}
 		reportDonef("the history is rewritten and pushed to %s", cfg.Remote)
-		return nil
+		return moved, nil
 	}
 	sayf("\nnot pushed. To publish the rewrite:\n\n    git %s\n",
 		strings.Join(pushArgs(cfg.Remote, publish), " "))
 	reportDonef("the history is rewritten here, and not pushed")
-	return nil
+	return moved, nil
 }
 
 // refSpecs names the history git-filter-repo is pointed at. filter-repo
@@ -161,6 +165,18 @@ func publishable(targets []target) []target {
 		}
 	}
 	return publish
+}
+
+// anyMoved reports whether the rewrite gave any ref a new hash. An --exclude'd
+// tag counts: it is repointed here and left out of the push, and this
+// repository's history has still changed.
+func anyMoved(targets []target) bool {
+	for _, t := range targets {
+		if t.moved() {
+			return true
+		}
+	}
+	return false
 }
 
 func unleasedRefs(targets []target) []string {

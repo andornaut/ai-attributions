@@ -287,6 +287,48 @@ func TestPublishable(t *testing.T) {
 	}
 }
 
+// A repository whose history changed says so in its own word, so a sweep of
+// applies separates the ones that were rewritten from the ones that only had a
+// finding the rewrite does not touch. An --exclude'd tag counts: it is
+// repointed here and left out of the push, and the history has still changed.
+func TestAnyMoved(t *testing.T) {
+	tests := []struct {
+		name    string
+		targets []target
+		want    bool
+	}{
+		{
+			name:    "a ref with a new hash",
+			targets: []target{{ref: "refs/heads/main", hash: "old", after: "new", publish: true}},
+			want:    true,
+		},
+		{
+			name:    "a ref the rewrite left where it was",
+			targets: []target{{ref: "refs/heads/main", hash: "same", after: "same", publish: true}},
+		},
+		{
+			name:    "a ref that resolved to nothing afterward",
+			targets: []target{{ref: "refs/heads/main", hash: "old", publish: true}},
+		},
+		{
+			name:    "a moved tag kept out of the push",
+			targets: []target{{ref: "refs/tags/dev", hash: "old", after: "new"}},
+			want:    true,
+		},
+		{
+			name: "nothing to rewrite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := anyMoved(tt.targets); got != tt.want {
+				t.Errorf("anyMoved() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // A branch is leased against the value the remote held at the last fetch, so a
 // remote that has moved since rejects the push. A ref with no remote-tracking
 // counterpart has no such value and is forced, which + marks.
@@ -350,8 +392,11 @@ func TestOutcomeStatus(t *testing.T) {
 	}{
 		{found: outcomeClean, exitCode: true, want: 0},
 		{found: outcomeFound, exitCode: true, want: 1},
+		{found: outcomeRewrote, exitCode: true, want: 1},
+		{found: outcomeOutOfScope, exitCode: true, want: 0},
 		{found: outcomeSkipped, exitCode: true, want: 3},
 		{found: outcomeFound, want: 0},
+		{found: outcomeRewrote, want: 0},
 		{found: outcomeSkipped, want: 0},
 	}
 

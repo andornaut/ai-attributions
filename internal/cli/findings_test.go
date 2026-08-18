@@ -255,7 +255,7 @@ func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	refs := []string{"refs/heads/main"}
 
 	report := captureReport(t, func() {
-		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -270,7 +270,7 @@ func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	git("update-ref", "refs/ai-attributions-backup/20260811T000000Z/heads/main", attributed)
 
 	report = captureReport(t, func() {
-		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -286,7 +286,7 @@ func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	git("update-ref", "refs/remotes/origin/topic", attributed)
 
 	report = captureReport(t, func() {
-		if err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
+		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
 			t.Fatal(err)
 		}
 	})
