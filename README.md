@@ -313,6 +313,7 @@ make coverage       # the suite under -race, then the per-function report
 make lint           # the golangci-lint run CI does, and make fmt applies
 make build          # a stripped static binary at bin/ai-attributions
 make install        # build, then copy it to /usr/local/bin with sudo
+make uninstall      # remove what install copied
 make publish VERSION=1.3.5  # bump action.yml's version default, tag, push both
 ```
 
