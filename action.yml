@@ -209,11 +209,10 @@ runs:
         # so the binary exits 2 on an unknown flag, and --emdashes meant a
         # tidy-up riding along on a commit an attribution already moved, so a
         # dash-only commit passes green under an input whose description says
-        # it fails. Read from the input rather than from the binary, which names
-        # itself for the commit it was built at: a dev build reports a v0.0.0
-        # pseudo-version and would fail a check on its own version. A version
-        # input that is not a release, dev for instance, is taken at its word: it
-        # is built from main and has whatever main has.
+        # it fails. Read from the input rather than from the binary, which
+        # reports "dev" for anything but a release and would fail a check on its
+        # own version. A version input that is not a release, dev for instance,
+        # is taken at its word: it is built from main and has whatever main has.
         if [ "$INPUT_EMDASHES" = true ] || [ "$INPUT_AGENTS_FILES" = true ]; then
           case "$INPUT_VERSION" in
             v[0-9]*)
