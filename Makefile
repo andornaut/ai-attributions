@@ -8,7 +8,7 @@ LDFLAGS := -s -w
 # its own, so the shipped binary is static.
 export CGO_ENABLED := 0
 
-.PHONY: all build clean coverage fmt install lint release test uninstall
+.PHONY: all build clean coverage fmt install lint publish test uninstall
 
 all: build
 
@@ -40,15 +40,19 @@ lint:
 	golangci-lint config verify
 	golangci-lint run
 
-## release: cut VERSION, both moves in one command. action.yml's version default
+## publish: cut VERSION, both moves in one command. action.yml's version default
 ## names the release it was cut with, so the edit has to be in the commit the tag
 ## points at: publishing one without the other leaves @v1 running this release's
 ## action against the previous release's binary, and protect-release-tags has no
 ## bypass to take the tag back with. The release workflow checks the same thing
-## before it publishes, for a tag cut by hand.
-release:
+## before it publishes, for a tag cut by hand, but only once the tag exists: it
+## stops the artifacts, not the tag, so a mistake costs the version number.
+##
+## Named for what it does rather than `release`, because it is the only target
+## in this repository that reaches a remote.
+publish:
 	@set -e; \
-	test -n "$(VERSION)" || { echo "usage: make release VERSION=1.3.4"; exit 1; }; \
+	test -n "$(VERSION)" || { echo "usage: make publish VERSION=1.3.5"; exit 1; }; \
 	tag=v$(patsubst v%,%,$(VERSION)); \
 	case $$tag in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "$$tag is not a release version"; exit 1;; esac; \
 	test -z "$$(git status --porcelain)" || { echo "the working tree has changes"; exit 1; }; \
