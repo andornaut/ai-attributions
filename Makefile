@@ -1,3 +1,6 @@
+# https://www.gnu.org/prep/standards/html_node/Directory-Variables.html#Directory-Variables
+PREFIX    ?= /usr/local
+BINPREFIX ?= $(PREFIX)/bin
 BIN := bin
 CMD := ai-attributions
 LDFLAGS := -s -w
@@ -5,7 +8,7 @@ LDFLAGS := -s -w
 # its own, so the shipped binary is static.
 export CGO_ENABLED := 0
 
-.PHONY: all build clean coverage fmt lint release test
+.PHONY: all build clean coverage fmt install lint release test uninstall
 
 all: build
 
@@ -57,6 +60,16 @@ release:
 	git commit --quiet action.yml --message="Install $$tag by default"; \
 	git tag "$$tag"; \
 	git push --atomic origin main "$$tag"
+
+## install: build, then copy the binary to $(BINPREFIX). Only the copy runs as
+## root: the build is a prerequisite, so the compiler runs as whoever typed it.
+install: build
+	sudo mkdir -p "$(DESTDIR)$(BINPREFIX)"
+	sudo cp -pf $(BIN)/$(CMD) "$(DESTDIR)$(BINPREFIX)/"
+
+## uninstall: remove what install copied
+uninstall:
+	sudo rm -f "$(DESTDIR)$(BINPREFIX)/$(CMD)"
 
 clean:
 	rm -rf $(BIN) dist
