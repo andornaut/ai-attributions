@@ -33,9 +33,13 @@ coverage:
 fmt:
 	golangci-lint fmt
 
-## lint: the checks CI runs, both of them. `run` accepts an unknown key inside
-## `linters.settings` and exits 0, which leaves that setting disabled while CI
-## stays green, so `config verify` is what rejects a misspelled one.
+## lint: golangci-lint, both of its commands. CI's Lint job also runs
+## markdownlint and `goreleaser check`, which need tooling this repository does
+## not otherwise ask for, so they are left to CI.
+##
+## `run` accepts an unknown key inside `linters.settings` and exits 0, which
+## leaves that setting disabled while CI stays green, so `config verify` is what
+## rejects a misspelled one.
 lint:
 	golangci-lint config verify
 	golangci-lint run
