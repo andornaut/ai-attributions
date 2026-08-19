@@ -51,6 +51,8 @@ jobs:
 
   build-platform:
     runs-on: ubuntu-latest
+    # Capped well under the six-hour default: nothing here runs longer than
+    # six minutes, so a job still going at fifteen has hung rather than failed.
     timeout-minutes: 15
 
     # The platforms .goreleaser.yaml builds for a tag. CGO_ENABLED=0 makes every
