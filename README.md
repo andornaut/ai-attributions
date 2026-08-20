@@ -326,6 +326,7 @@ Package | Role
 [`internal/clean`](./internal/clean) | the message and identity tests, as pure functions
 [`internal/gitexec`](./internal/gitexec) | wraps the git commands
 [`internal/rewrite`](./internal/rewrite) | drives `git-filter-repo`
+[`internal/version`](./internal/version) | the one version string: the linker stamps a release build, `go install` recovers it from the module version, and a build from a working tree stays `dev`
 `main.go` | hands cobra the arguments and exits on what comes back
 
 Every decision is made in Go: the rewrite writes a map of original commit hash to replacement fields, then hands `git-filter-repo` a `--commit-callback` that looks each commit up by `commit.original_id`.
