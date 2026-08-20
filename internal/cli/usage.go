@@ -55,8 +55,7 @@ func ExitCode(err error) int {
 	if err == nil {
 		return ExitClean
 	}
-	var s *statusError
-	if errors.As(err, &s) {
+	if s, ok := errors.AsType[*statusError](err); ok {
 		return s.code
 	}
 	return ExitFailed

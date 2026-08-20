@@ -293,8 +293,8 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 		dirty := make(map[string]bool, len(graph))
 		earliest := ""
 		// Reversed, so that a commit is decided after its parents are.
-		for i := len(graph) - 1; i >= 0; i-- {
-			hash, parents := graph[i][0], graph[i][1:]
+		for _, entry := range slices.Backward(graph) {
+			hash, parents := entry[0], entry[1:]
 			if _, changed := f.changes[hash]; !changed {
 				changed = false
 				for _, parent := range parents {
