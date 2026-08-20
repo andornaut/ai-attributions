@@ -21,7 +21,7 @@ inputs:
       action.yml was cut with, so a workflow on @v1 moves binary and action
       together. dev is the build re-cut on every push to main.
     required: false
-    default: v1.3.5
+    default: v1.3.6
   path:
     description: The repository to scan, relative to the workspace.
     required: false
