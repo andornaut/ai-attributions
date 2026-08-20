@@ -1,4 +1,5 @@
-// Argument parsing: the usage text, the commands, and the flags.
+// The repeatable --exclude flag: the pflag.Value that collects ref patterns,
+// and the match it tests a ref with.
 
 package cli
 

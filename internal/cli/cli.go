@@ -1,6 +1,6 @@
-// Package cli is the command: argument parsing, the report it prints, and the
-// scan and rewrite it drives. Everything but the entry point lives here, so
-// what main does is call Main and exit on what it returns.
+// Package cli is the work behind the commands: the scan and rewrite they drive,
+// and the report they print. The command line itself is cmd's; it calls Execute
+// and turns the status into the exit code main leaves on.
 package cli
 
 import (
