@@ -314,7 +314,7 @@ make lint           # the golangci-lint run CI does, and make fmt applies
 make build          # a stripped static binary at bin/ai-attributions
 make install        # build, then copy it to /usr/local/bin with sudo
 make uninstall      # remove what install copied
-make publish VERSION=1.3.5  # bump action.yml's version default, tag, push both
+make publish VERSION=x.y.z  # bump action.yml's version default, tag, push both
 ```
 
 CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it. The release refuses a tag whose `action.yml` names a different version, which is what `make publish` keeps together.

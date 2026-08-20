@@ -56,7 +56,7 @@ lint:
 ## in this repository that reaches a remote.
 publish:
 	@set -e; \
-	test -n "$(VERSION)" || { echo "usage: make publish VERSION=1.3.5"; exit 1; }; \
+	test -n "$(VERSION)" || { echo "usage: make publish VERSION=x.y.z"; exit 1; }; \
 	tag=v$(patsubst v%,%,$(VERSION)); \
 	case $$tag in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "$$tag is not a release version"; exit 1;; esac; \
 	test -z "$$(git status --porcelain)" || { echo "the working tree has changes"; exit 1; }; \
