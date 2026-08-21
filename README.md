@@ -270,7 +270,7 @@ Input | Default | What it is
 `emdashes` | `false` | fail the run on the emdashes and endashes in the commit messages it reads
 `agents-files` | `false` | fail the run on the agent instruction files the branch carries
 
-- `emdashes` and `agents-files` need a `version` carrying the check behind them. `agents-files` ends the step on one that does not; `--emdashes` is accepted by every release, so a dash-only commit passes green under an older binary.
+- `emdashes` and `agents-files` both landed in v1.3.0, and a `version` naming a release older than that ends the step rather than scanning with it. The two are refused for different reasons: an older binary exits 2 on `--agents-files`, which never existed, and accepts `--emdashes` with the meaning it had then, a tidy-up riding along, which would pass a dash-only commit green under an input whose description says it fails. A `version` that is not a release, `dev` for instance, is taken at its word.
 - `v1` follows the newest `v1.x.y`, `@v1.0.0` pins one release, and a sha pins the action's code. `version` defaults to the release its `action.yml` was cut with, so `@v1` moves both halves together; `version: dev` installs the rolling build.
 - A base the action guessed and cannot resolve widens to the whole history with a warning; one passed as `base` fails the step. A push to the default branch has no base, so it reads the whole history.
 - Nothing is rewritten in CI, so `identity` only decides what the report says. `identity: none` turns identity reporting off, and an agent-authored commit with no trailer then passes.
