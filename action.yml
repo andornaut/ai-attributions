@@ -40,10 +40,10 @@ inputs:
       as well as on the attributions. The figure dash and the horizontal bar are
       left alone. Off by default: a typographic mark is a house style rather
       than an ad, so a repository asks for it. apply takes them back out.
-      Needs a version where such a dash is a finding of its own, which is any
-      that also has agents-files: an older release accepts the flag with the
-      meaning it had then, a tidy-up riding along, and passes a dash-only
-      commit.
+      Needs v1.3.0 or newer, the release that made such a dash a finding of its
+      own. An older one is refused rather than scanned with: it accepts the flag
+      with the meaning it had then, a tidy-up riding along, and would pass a
+      dash-only commit under an input whose description says it fails.
     required: false
     default: "false"
   agents-files:
