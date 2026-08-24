@@ -30,19 +30,18 @@ type backup struct {
 }
 
 func listBackups(repo *gitexec.Repo) error {
-	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname:short)", backupPrefix)
+	runs, err := savedRuns(repo)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(listing) == "" {
+	if len(runs) == 0 {
 		sayf("no backups saved\n")
 		return nil
 	}
-	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
-		ref, hash, _ := strings.Cut(line, " ")
-		saved := strings.TrimPrefix(ref, backupPrefix)
-		stamp, original, _ := strings.Cut(saved, "/")
-		sayf("%s  refs/%s  %s\n", stamp, original, hash)
+	for _, run := range runs {
+		for _, ref := range run.sorted() {
+			sayf("%s  %s  %s\n", run.stamp, ref, gitexec.Short(run.refs[ref]))
+		}
 	}
 	sayf("\nput one run back with: ai-attributions restore <timestamp>\n")
 	sayf("take them away with: ai-attributions clean, or clean --keep-last <n>\n")
@@ -50,38 +49,27 @@ func listBackups(repo *gitexec.Repo) error {
 }
 
 func restoreBackup(repo *gitexec.Repo, stamp string) error {
-	// Ref completion offers a trailing slash, which would build a prefix that
-	// matches nothing.
+	// Ref completion offers a trailing slash, which would name a run nothing is
+	// saved under.
 	stamp = strings.Trim(stamp, "/")
 	if stamp == "" {
 		return errors.New("restore needs a backup timestamp; ai-attributions backups lists them")
 	}
-
-	prefix := backupPrefix + stamp + "/"
-	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", prefix)
+	runs, err := savedRuns(repo)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(listing) == "" {
+	run, ok := findRun(runs, stamp)
+	if !ok {
 		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
 
-	restored := 0
-	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
-		ref, hash, _ := strings.Cut(line, " ")
-		saved, ok := strings.CutPrefix(ref, prefix)
-		if !ok {
-			return fmt.Errorf("%s is not under %s, so the ref to restore cannot be worked out", ref, prefix)
-		}
-		original := "refs/" + saved
-		if err := repo.UpdateRef(hash, original); err != nil {
+	for _, ref := range run.sorted() {
+		hash := run.refs[ref]
+		if err := repo.UpdateRef(hash, ref); err != nil {
 			return err
 		}
-		sayf("%s -> %s\n", original, gitexec.Short(hash))
-		restored++
-	}
-	if restored == 0 {
-		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
+		sayf("%s -> %s\n", ref, gitexec.Short(hash))
 	}
 	sayf("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
 	return nil
@@ -124,13 +112,11 @@ func cleanBackups(repo *gitexec.Repo, cfg Config, stamp string) error {
 // cleanOneRun takes away the backup one timestamp names, and reports a
 // timestamp that names none as a failure rather than as nothing to do.
 func cleanOneRun(repo *gitexec.Repo, runs []savedRun, stamp string) error {
-	for _, run := range runs {
-		if run.stamp != stamp {
-			continue
-		}
-		return removeRun(repo, run)
+	run, ok := findRun(runs, stamp)
+	if !ok {
+		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
-	return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
+	return removeRun(repo, run)
 }
 
 // saveBackup records where each ref stands before the rewrite moves it, and
@@ -161,7 +147,7 @@ func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
 
 	stamp := freeStamp(runs, time.Now())
 	for ref, hash := range saving {
-		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(ref, "refs/")); err != nil {
+		if err := repo.UpdateRef(hash, backupRef(stamp, ref)); err != nil {
 			return backup{}, err
 		}
 	}
@@ -189,16 +175,14 @@ func dropBackupIfUnused(repo *gitexec.Repo, moved bool, saved backup) error {
 	if err != nil {
 		return err
 	}
-	for _, run := range runs {
-		if run.stamp != saved.stamp {
-			continue
-		}
-		if err := repo.DeleteRefs(refsOf(run)); err != nil {
-			return err
-		}
-		sayf("\nno ref moved, so the backup saved above is taken away rather than kept as a copy of what is still there\n")
+	run, ok := findRun(runs, saved.stamp)
+	if !ok {
 		return nil
 	}
+	if err := repo.DeleteRefs(refsOf(run)); err != nil {
+		return err
+	}
+	sayf("\nno ref moved, so the backup saved above is taken away rather than kept as a copy of what is still there\n")
 	return nil
 }
 
@@ -231,9 +215,11 @@ func removeRun(repo *gitexec.Repo, run savedRun) error {
 	return nil
 }
 
-// savedRuns returns every backup this tool has saved, oldest first. The
-// timestamps are fixed width and UTC, so ordering them as strings orders them
-// by time.
+// savedRuns returns every backup this tool has saved, oldest first. It is the
+// one reader of the namespace: everything that lists, restores, prunes or
+// counts a backup works from what it returns, so the layout of a backup ref is
+// written down here alone. The timestamps are fixed width and UTC, so ordering
+// them as strings orders them by time.
 func savedRuns(repo *gitexec.Repo) ([]savedRun, error) {
 	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
 	if err != nil {
@@ -267,14 +253,35 @@ func savedRuns(repo *gitexec.Repo) ([]savedRun, error) {
 	return runs, nil
 }
 
+// findRun returns the run saved under a timestamp, for a caller that has been
+// given one to act on rather than a run to act on.
+func findRun(runs []savedRun, stamp string) (savedRun, bool) {
+	for _, run := range runs {
+		if run.stamp == stamp {
+			return run, true
+		}
+	}
+	return savedRun{}, false
+}
+
+// sorted returns the refs a run saved, in one order rather than a map's, so
+// that two listings of one backup read the same way.
+func (r savedRun) sorted() []string { return slices.Sorted(maps.Keys(r.refs)) }
+
 // refsOf returns the backup refs one run holds, which are the refs it saved
 // under its own timestamp rather than the refs it saved them for.
 func refsOf(run savedRun) []string {
 	refs := make([]string, 0, len(run.refs))
 	for ref := range run.refs {
-		refs = append(refs, backupPrefix+run.stamp+"/"+strings.TrimPrefix(ref, "refs/"))
+		refs = append(refs, backupRef(run.stamp, ref))
 	}
 	return refs
+}
+
+// backupRef is where one run saves one ref, which is the layout savedRuns reads
+// back. Written down beside it, so the two cannot drift apart.
+func backupRef(stamp, ref string) string {
+	return backupPrefix + stamp + "/" + strings.TrimPrefix(ref, "refs/")
 }
 
 // freeStamp returns the timestamp to save a run under: the time now, moved past

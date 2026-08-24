@@ -283,8 +283,8 @@ Input | Default | What it is
 
 ```console
 $ ai-attributions backups
-20260811T054927Z  refs/heads/main  812479b
-20260811T061340Z  refs/heads/main  4f0ac91
+20260811T054927Z  refs/heads/main  812479bfcbdf
+20260811T061340Z  refs/heads/main  4f0ac91d2b6e
 
 put one run back with: ai-attributions restore <timestamp>
 take them away with: ai-attributions clean, or clean --keep-last <n>

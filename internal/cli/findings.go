@@ -408,39 +408,22 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 // here.
 func rewrittenHere(repo *gitexec.Repo) map[string]bool {
 	saved := map[string]bool{}
-	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
+	// A repository whose backups cannot be read is one this has nothing to say
+	// about, and the branches are still reported without it.
+	runs, err := savedRuns(repo)
 	if err != nil {
 		return saved
 	}
-	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
-		ref, hash, ok := strings.Cut(line, " ")
-		if !ok {
-			continue
-		}
-		if branch := backedUpBranch(ref); branch != "" {
-			saved[rewrittenKey(branch, hash)] = true
+	for _, run := range runs {
+		for ref, hash := range run.refs {
+			// A tag has no remote-tracking counterpart to be compared against,
+			// so only the branches a run saved are keyed here.
+			if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+				saved[rewrittenKey(branch, hash)] = true
+			}
 		}
 	}
 	return saved
-}
-
-// backedUpBranch returns the branch a backup ref was saved for, or "" for a tag,
-// which has no remote-tracking counterpart to be compared against. A backup is
-// saved as refs/ai-attributions-backup/<stamp>/heads/<branch>.
-func backedUpBranch(ref string) string {
-	saved, ok := strings.CutPrefix(ref, backupPrefix)
-	if !ok {
-		return ""
-	}
-	_, saved, ok = strings.Cut(saved, "/")
-	if !ok {
-		return ""
-	}
-	branch, ok := strings.CutPrefix(saved, "heads/")
-	if !ok {
-		return ""
-	}
-	return branch
 }
 
 func rewrittenKey(branch, hash string) string { return branch + " " + hash }

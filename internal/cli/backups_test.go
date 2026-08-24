@@ -237,6 +237,31 @@ func TestCleanBackups(t *testing.T) {
 	}
 }
 
+// The listing names each saved ref by the ref it was saved for, and abbreviates
+// the commit the way every other report does: backups and restore naming one
+// commit at two widths would read as two commits.
+func TestListBackupsNamesTheRefsARunSaved(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("tag", "v1")
+	hash, err := repo.Resolve("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamps := saveAll(t, repo, []map[string]string{{"refs/heads/main": hash, "refs/tags/v1": hash}})
+
+	report := capture(t, func() {
+		if err := listBackups(repo); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, ref := range []string{"refs/heads/main", "refs/tags/v1"} {
+		want := fmt.Sprintf("%s  %s  %s\n", stamps[0], ref, gitexec.Short(hash))
+		if !strings.Contains(report, want) {
+			t.Errorf("backups reported\n%s\nwant a line %q", report, want)
+		}
+	}
+}
+
 func TestCleanBackupsWithNoneSaved(t *testing.T) {
 	repo, _ := gitRepo(t)
 	report := capture(t, func() {
