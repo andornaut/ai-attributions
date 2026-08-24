@@ -60,10 +60,11 @@ var clean = &cobra.Command{
 	Long: "Remove backups: the refs one run saved where a timestamp names it,\n" +
 		"every run but the newest n where --keep-last bounds them, and every\n" +
 		"backup the repository holds where neither says so.\n\n" +
-		"apply keeps the last 3 runs by itself, so this is for bounding the\n" +
-		"namespace to another number or emptying it. A backup keeps the\n" +
-		"pre-rewrite commits reachable; removing one takes the refs away and not\n" +
-		"the objects, which git gc expires on its own schedule.",
+		"apply prunes the runs before it to the last 3 as it saves its own, so a\n" +
+		"repository holds four at most and this is for bounding the namespace to\n" +
+		"another number or emptying it. A backup keeps the pre-rewrite commits\n" +
+		"reachable; removing one takes the refs away and not the objects, which\n" +
+		"git gc expires on its own schedule.",
 	// The timestamp comes first where there is one, as restore's does, and a
 	// command line that named both it and --keep-last has asked for two
 	// different things.

@@ -308,6 +308,8 @@ removed 20260811T054927Z (1 ref)
 removed 1 of 2 saved runs
 ```
 
+The backups are also what a scan reads to tell a rewrite that has not been pushed from a remote branch carrying attributions of its own, so it answers for as far back as they reach: once a run is pruned or cleaned away, its unpushed rewrite is reported as a remote branch instead.
+
 Removing a backup takes the refs away and not the objects. A branch's pre-rewrite tip is still in its reflog, which `git gc` expires on its own schedule; `git reflog expire --expire=now --all && git gc --prune=now` takes both. A tag has no reflog, so its backup is the only record of where it stood.
 
 The push covers the refs the rewrite moved and only those, so a ref whose commits carried no change keeps its hash. Each is pushed with `--force-with-lease`: a branch leases against its remote-tracking ref, and a tag, having none, against its pre-rewrite commit read from `git ls-remote`. The push is `--atomic`, since half a published rewrite is a branch on new history beside a tag still naming the old.

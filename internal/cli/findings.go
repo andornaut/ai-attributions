@@ -401,6 +401,11 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 // own branch's pre-rewrite tip is a push that has not happened; one that merely
 // sits on some other ref's old tip is a branch of its own, and pushing this
 // rewrite would not move it, so it is left to be reported as one.
+//
+// The backups are what this reads, so it answers for as far back as they reach:
+// once pruning or clean has taken a run away, the rewrite it saved reports as a
+// remote branch carrying attributions rather than as one already rewritten
+// here.
 func rewrittenHere(repo *gitexec.Repo) map[string]bool {
 	saved := map[string]bool{}
 	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
