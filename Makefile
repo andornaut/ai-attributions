@@ -17,8 +17,8 @@ build:
 	@mkdir -p $(BIN)
 	go build -ldflags="$(LDFLAGS)" -trimpath -o $(BIN)/$(CMD) .
 
-## test: the whole suite. The fork tests build real repositories, so git has to
-## be installed; nothing here needs git-filter-repo, which only apply drives.
+## test: the whole suite. Parts of it build real repositories, so git has to be
+## installed; nothing here needs git-filter-repo, which only apply drives.
 test:
 	go test ./...
 

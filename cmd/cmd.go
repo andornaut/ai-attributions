@@ -69,6 +69,15 @@ var clean = &cobra.Command{
 	// command line that named both it and --keep-last has asked for two
 	// different things.
 	Args: func(c *cobra.Command, args []string) error {
+		// A timestamp further along is a transposed command line. Reading it as
+		// a repo-path would leave the run it names saved and take every other
+		// backup away, this command's argument-less form being the one that
+		// removes them all.
+		for i, arg := range args {
+			if i > 0 && cli.ValidStamp(arg) {
+				return cli.Usagef("clean reads the timestamp before the paths, so name %s first", arg)
+			}
+		}
 		if !c.Flags().Changed("keep-last") {
 			return nil
 		}

@@ -378,18 +378,33 @@ func (r *Repo) UpdateRef(hash, ref string) error {
 	return err
 }
 
-// DeleteRefs removes refs, in one update rather than one per ref: a batch
-// leaves the namespace either as it was or as it was asked for, where a loop
-// can stop half way through the refs one run saved.
-func (r *Repo) DeleteRefs(refs []string) error {
-	if len(refs) == 0 {
-		return nil
+// UpdateRefs points each ref at the hash it is keyed with, in one update rather
+// than one per ref.
+func (r *Repo) UpdateRefs(refs map[string]string) error {
+	var stdin bytes.Buffer
+	for ref, hash := range refs {
+		fmt.Fprintf(&stdin, "update %s %s\n", ref, hash)
 	}
+	return r.refUpdates(&stdin)
+}
+
+// DeleteRefs removes refs, in one update rather than one per ref.
+func (r *Repo) DeleteRefs(refs []string) error {
 	var stdin bytes.Buffer
 	for _, ref := range refs {
 		fmt.Fprintf(&stdin, "delete %s\n", ref)
 	}
-	_, err := r.outputWithInput(&stdin, "update-ref", "--stdin")
+	return r.refUpdates(&stdin)
+}
+
+// refUpdates runs one update-ref transaction, in which every line lands or none
+// does. A loop of single updates can stop half way through the refs one run
+// saves, and half a saved run reads like a whole one to whatever puts it back.
+func (r *Repo) refUpdates(commands *bytes.Buffer) error {
+	if commands.Len() == 0 {
+		return nil
+	}
+	_, err := r.outputWithInput(commands, "update-ref", "--stdin")
 	return err
 }
 

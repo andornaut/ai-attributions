@@ -88,6 +88,28 @@ func TestSaveBackupPrunesBeforeTheRewrite(t *testing.T) {
 	}
 }
 
+// A rewrite that reuses a snapshot prunes what one that writes its own would.
+// The reused snapshot is this run's, so the bound counts the runs before it
+// either way and restore reaches back the same distance.
+func TestSaveBackupReusePrunesLikeAWrite(t *testing.T) {
+	repo, git := gitRepo(t)
+	saving := snapshots(t, repo, git, defaultKeepRuns+1)
+	before := saveAll(t, repo, saving)
+
+	capture(t, func() {
+		saved, err := saveBackup(repo, saving[len(saving)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.wrote {
+			t.Error("a snapshot already saved was written a second time")
+		}
+	})
+	if got := savedStamps(t, repo); !slices.Equal(got, before) {
+		t.Errorf("saved runs are %q, want the %q a write would have left", got, before)
+	}
+}
+
 // A rewrite that moves nothing leaves the runs before it exactly where they
 // were. Its own snapshot goes, and it cost none of theirs to save: a run that
 // recorded nothing must not shorten how far back restore reaches.

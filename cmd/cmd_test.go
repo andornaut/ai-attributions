@@ -162,6 +162,20 @@ func TestCleanTakesATimestampOrABound(t *testing.T) {
 	}
 }
 
+// clean reads the timestamp before the paths. Taken the other way round, a
+// transposed command line would leave the run it names saved and take every
+// other backup away, the argument-less form being the one that removes them
+// all.
+func TestCleanRefusesATimestampAfterAPath(t *testing.T) {
+	_, err := execute(t, "clean", t.TempDir(), "20260811T121757Z")
+	if err == nil {
+		t.Fatal("clean accepted a timestamp after a path")
+	}
+	if !strings.Contains(err.Error(), "before the paths") {
+		t.Errorf("the error is %q, want it to say which comes first", err)
+	}
+}
+
 // restore reads a timestamp before a path, so a lone path is refused rather
 // than taken for the backup to put back.
 func TestRestoreNeedsATimestamp(t *testing.T) {

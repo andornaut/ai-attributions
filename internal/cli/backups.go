@@ -139,17 +139,27 @@ func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
 		reused := runs[len(runs)-1]
 		sayf("the refs stand where %s%s/ saved them, so no second copy is written\n",
 			backupPrefix, reused.stamp)
-		if _, err := pruneRuns(repo, runs, defaultKeepRuns); err != nil {
+		// The reused snapshot is this run's, so the bound is over what is left
+		// once it is set aside, as it is below. Counting it would leave a run
+		// that reused a snapshot reaching one rewrite less far back than one
+		// that wrote its own.
+		if _, err := pruneRuns(repo, runs[:len(runs)-1], defaultKeepRuns); err != nil {
 			return backup{}, err
 		}
 		return backup{stamp: reused.stamp}, nil
 	}
 
+	// Written in one update, so that a run is saved whole or not at all: a
+	// snapshot missing the refs a failure interrupted reads like a complete one
+	// to restore, which would put a branch back and leave the tag that moved
+	// with it where the rewrite left it.
 	stamp := freeStamp(runs, time.Now())
+	writing := make(map[string]string, len(saving))
 	for ref, hash := range saving {
-		if err := repo.UpdateRef(hash, backupRef(stamp, ref)); err != nil {
-			return backup{}, err
-		}
+		writing[backupRef(stamp, ref)] = hash
+	}
+	if err := repo.UpdateRefs(writing); err != nil {
+		return backup{}, err
 	}
 	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
 	// The bound is over the runs that came before, and this run's own snapshot
