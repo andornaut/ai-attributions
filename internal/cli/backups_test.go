@@ -284,6 +284,43 @@ func TestListBackupsNamesTheRefsARunSaved(t *testing.T) {
 	}
 }
 
+// restore puts back every ref one run saved, and a timestamp naming no run is a
+// failure rather than a restore of nothing.
+func TestRestoreBackup(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("tag", "v1")
+	before, err := repo.Resolve("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamps := saveAll(t, repo, []map[string]string{{"refs/heads/main": before, "refs/tags/v1": before}})
+
+	// Both refs move on, as a rewrite moves them.
+	git("commit", "--quiet", "--allow-empty", "--message=rewritten")
+	git("tag", "--force", "v1")
+
+	capture(t, func() {
+		if err := restoreBackup(repo, stamps[0]); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, ref := range []string{"refs/heads/main", "refs/tags/v1"} {
+		got, err := repo.Resolve(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != before {
+			t.Errorf("%s is at %s, want the %s the run saved", ref, got, before)
+		}
+	}
+
+	var restoreErr error
+	capture(t, func() { restoreErr = restoreBackup(repo, "20200101T000000Z") })
+	if restoreErr == nil {
+		t.Error("restore took a timestamp naming no backup for a run to put back")
+	}
+}
+
 func TestCleanBackupsWithNoneSaved(t *testing.T) {
 	repo, _ := gitRepo(t)
 	report := capture(t, func() {

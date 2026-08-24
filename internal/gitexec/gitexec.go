@@ -372,12 +372,6 @@ func (r *Repo) Config(key string) string {
 	return strings.TrimSpace(out)
 }
 
-// UpdateRef points ref at hash.
-func (r *Repo) UpdateRef(hash, ref string) error {
-	_, err := r.Output("update-ref", ref, hash)
-	return err
-}
-
 // UpdateRefs points each ref at the hash it is keyed with, in one update rather
 // than one per ref.
 func (r *Repo) UpdateRefs(refs map[string]string) error {

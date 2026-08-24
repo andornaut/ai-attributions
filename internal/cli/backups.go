@@ -64,12 +64,14 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 		return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
 	}
 
+	// In one update, as the run was saved in one: a restore that stopped part
+	// way would put a branch back and leave the tag that moved with it where
+	// the rewrite left it.
+	if err := repo.UpdateRefs(run.refs); err != nil {
+		return err
+	}
 	for _, ref := range run.sorted() {
-		hash := run.refs[ref]
-		if err := repo.UpdateRef(hash, ref); err != nil {
-			return err
-		}
-		sayf("%s -> %s\n", ref, gitexec.Short(hash))
+		sayf("%s -> %s\n", ref, gitexec.Short(run.refs[ref]))
 	}
 	sayf("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
 	return nil
