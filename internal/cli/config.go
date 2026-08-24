@@ -9,11 +9,12 @@ const (
 	identityNone = "none"
 )
 
-// defaultKeepRuns bounds the backup namespace: the number of runs whose
-// pre-rewrite refs a rewrite leaves behind. The oldest goes first, and across a
-// sequence of rewrites that is the one naming the history the first started
-// from, so this is how far back restore can reach. A run that moves nothing
-// leaves no snapshot, so these are three rewrites rather than three
+// defaultKeepRuns bounds the backup namespace: the number of earlier runs whose
+// pre-rewrite refs a rewrite leaves in place, its own snapshot sitting above
+// the bound until the next one prunes to it again. The oldest goes first, and
+// across a sequence of rewrites that is the one naming the history the first
+// started from, so this is how far back restore can reach. A run that moves
+// nothing leaves no snapshot, so these are three rewrites rather than three
 // invocations, and clean --keep-last asks for another number.
 const defaultKeepRuns = 3
 

@@ -57,17 +57,17 @@ func savedStamps(t *testing.T, repo *gitexec.Repo) []string {
 	return stamps
 }
 
-// A rewrite leaves a bounded namespace behind without being asked to: the
-// backups grow by one run each time and the oldest goes, so a repository
+// A rewrite leaves a bounded namespace behind without being asked to: it prunes
+// the runs before it to the bound and saves its own above it, so a repository
 // rewritten every day does not accumulate every ref it ever held.
 func TestSaveBackupKeepsTheLastRuns(t *testing.T) {
 	repo, git := gitRepo(t)
 	stamps := saveAll(t, repo, snapshots(t, repo, git, defaultKeepRuns+2))
 
 	got := savedStamps(t, repo)
-	want := stamps[len(stamps)-defaultKeepRuns:]
+	want := stamps[len(stamps)-(defaultKeepRuns+1):]
 	if !slices.Equal(got, want) {
-		t.Errorf("saved runs are %q, want the last %d: %q", got, defaultKeepRuns, want)
+		t.Errorf("saved runs are %q, want the last %d: %q", got, defaultKeepRuns+1, want)
 	}
 }
 
@@ -75,16 +75,38 @@ func TestSaveBackupKeepsTheLastRuns(t *testing.T) {
 // outlives the run that published the rewrite it undoes.
 func TestSaveBackupPrunesBeforeTheRewrite(t *testing.T) {
 	repo, git := gitRepo(t)
-	saving := snapshots(t, repo, git, defaultKeepRuns+1)
-	stamps := saveAll(t, repo, saving[:defaultKeepRuns])
+	saving := snapshots(t, repo, git, defaultKeepRuns+2)
+	stamps := saveAll(t, repo, saving[:defaultKeepRuns+1])
 
 	report := capture(t, func() {
-		if _, err := saveBackup(repo, saving[defaultKeepRuns]); err != nil {
+		if _, err := saveBackup(repo, saving[defaultKeepRuns+1]); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if !strings.Contains(report, "removed "+stamps[0]) {
 		t.Errorf("the run reported %q, want the oldest run removed as it saved its own", report)
+	}
+}
+
+// A rewrite that moves nothing leaves the runs before it exactly where they
+// were. Its own snapshot goes, and it cost none of theirs to save: a run that
+// recorded nothing must not shorten how far back restore reaches.
+func TestSaveBackupKeepsEarlierRunsWhenNothingMoves(t *testing.T) {
+	repo, git := gitRepo(t)
+	saving := snapshots(t, repo, git, defaultKeepRuns+1)
+	before := saveAll(t, repo, saving[:defaultKeepRuns])
+
+	capture(t, func() {
+		saved, err := saveBackup(repo, saving[defaultKeepRuns])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := dropBackupIfUnused(repo, false, saved); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got := savedStamps(t, repo); !slices.Equal(got, before) {
+		t.Errorf("saved runs are %q, want the %q that were there before", got, before)
 	}
 }
 
@@ -224,6 +246,15 @@ func TestCleanBackupsWithNoneSaved(t *testing.T) {
 	})
 	if !strings.Contains(report, "no backups saved") {
 		t.Errorf("clean reported %q, want it to say there is nothing saved", report)
+	}
+
+	// A timestamp naming no backup is a failure whether the repository holds
+	// other backups or none at all, as restore's is: a sweep that read one as
+	// nothing to do would exit 0 on a timestamp nothing matched anywhere.
+	var err error
+	capture(t, func() { err = cleanBackups(repo, Config{}, "20200101T000000Z") })
+	if err == nil {
+		t.Error("clean took a timestamp naming no backup for nothing to do")
 	}
 }
 

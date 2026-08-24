@@ -284,6 +284,7 @@ Input | Default | What it is
 ```console
 $ ai-attributions backups
 20260811T054927Z  refs/heads/main  812479b
+20260811T061340Z  refs/heads/main  4f0ac91
 
 put one run back with: ai-attributions restore <timestamp>
 take them away with: ai-attributions clean, or clean --keep-last <n>
@@ -294,7 +295,9 @@ refs/heads/main -> 812479bfcbdf
 restored. A published rewrite still needs a force push to undo on the remote
 ```
 
-A rewrite leaves the last 3 runs behind: it saves its own snapshot and prunes what earlier runs left to make room, so the namespace is bounded with no flag to remember. It prunes at the start of a run rather than at the end of one: a backup is what `restore` puts back after a rewrite that turned out to be wrong, and publishing that rewrite is what opens the window in which someone reaches for it, so the next run is what takes it away. A run whose refs stand where the newest backup saved them reuses that one instead of writing a second copy, and a rewrite that moves nothing takes its own snapshot away again.
+A rewrite prunes the runs before it to the last 3 and saves its own above them, so the namespace is bounded with no flag to remember and holds four saved runs at most. It prunes at the start of a run rather than at the end of one: a backup is what `restore` puts back after a rewrite that turned out to be wrong, and publishing that rewrite is what opens the window in which someone reaches for it, so the next run is what takes it away.
+
+A run whose refs stand where the newest backup saved them reuses that one instead of writing a second copy, and a rewrite that moves nothing takes its own snapshot away again. The bound counts earlier runs alone for that reason: a snapshot the run itself may take back would otherwise have cost an earlier one to save.
 
 `clean` removes backups: the refs one run saved where a timestamp names it, every run but the newest with `--keep-last`, and every backup the repository holds where neither says so.
 

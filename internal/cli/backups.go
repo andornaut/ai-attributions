@@ -95,13 +95,15 @@ func cleanBackups(repo *gitexec.Repo, cfg Config, stamp string) error {
 	if err != nil {
 		return err
 	}
+	// Ref completion offers a trailing slash, as it does to restore. Read
+	// before the listing is weighed, so that a timestamp naming no backup is a
+	// failure whether the repository holds other backups or none at all.
+	if stamp = strings.Trim(stamp, "/"); stamp != "" {
+		return cleanOneRun(repo, runs, stamp)
+	}
 	if len(runs) == 0 {
 		sayf("no backups saved\n")
 		return nil
-	}
-	// Ref completion offers a trailing slash, as it does to restore.
-	if stamp = strings.Trim(stamp, "/"); stamp != "" {
-		return cleanOneRun(repo, runs, stamp)
 	}
 
 	// Zero for the bare command, which takes every backup away.
@@ -164,9 +166,12 @@ func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
 		}
 	}
 	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
-	// One slot of the bound is this run's, so the earlier runs are pruned to
-	// one fewer.
-	if _, err := pruneRuns(repo, runs, defaultKeepRuns-1); err != nil {
+	// The bound is over the runs that came before, and this run's own snapshot
+	// sits above it until the next rewrite prunes to it again. Counting this
+	// one against the bound would cost an earlier run for a snapshot that a
+	// rewrite moving nothing then takes away again, leaving one fewer than the
+	// bound and no way back to it.
+	if _, err := pruneRuns(repo, runs, defaultKeepRuns); err != nil {
 		return backup{}, err
 	}
 	return backup{stamp: stamp, wrote: true}, nil
