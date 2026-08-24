@@ -13,9 +13,10 @@ import (
 )
 
 // Execute runs cfg against every path given and returns the status to exit
-// with. stamp is the backup the restore command puts back, and is empty for
-// every other command. No path means the current directory, which is what makes
-// the tool answerable from inside a checkout with nothing to name.
+// with. stamp names one saved run, which restore puts back and clean takes
+// away, and is empty for every other command. No path means the current
+// directory, which is what makes the tool answerable from inside a checkout
+// with nothing to name.
 func Execute(op Op, cfg Config, stamp string, paths []string) (int, error) {
 	if len(paths) == 0 {
 		paths = []string{"."}
@@ -95,11 +96,13 @@ func runRepo(op Op, cfg Config, stamp, repoPath string) (outcome, error) {
 	}
 	cfg.Remote = targetRemote(repo)
 
-	// backups and restore only put back refs this tool saved, so they stay
-	// available whatever the repository is.
+	// backups, clean and restore only read or move refs this tool saved, so
+	// they stay available whatever the repository is.
 	switch op {
 	case OpBackups:
 		return outcomeClean, listBackups(repo)
+	case OpClean:
+		return outcomeClean, cleanBackups(repo, cfg, stamp)
 	case OpRestore:
 		return outcomeClean, restoreBackup(repo, stamp)
 	case OpScan, OpApply:
@@ -136,10 +139,10 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 	var reports []result
 	var failed, found, skipped bool
 	for _, repoPath := range paths {
-		// backups and restore report rather than scan. There is no finding to
-		// summarize, and what they print is the whole point of running them, so
-		// it goes straight out under a heading instead of being weighed against
-		// an outcome none of them produce.
+		// backups, clean and restore report rather than scan. There is no
+		// finding to summarize, and what they print is the whole point of
+		// running them, so it goes straight out under a heading instead of
+		// being weighed against an outcome none of them produce.
 		if !op.walksHistory() {
 			sayf("=== %s\n", repoPath)
 			if _, err := runRepo(op, cfg, stamp, repoPath); err != nil {

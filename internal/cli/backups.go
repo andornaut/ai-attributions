@@ -1,14 +1,33 @@
-// The backups and restore commands.
+// The backups, restore and clean commands, and the snapshot an apply saves.
 
 package cli
 
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
+
+// savedRun is one run's backup: the timestamp it was saved under, and where
+// each ref stood before that run rewrote it, keyed by the ref itself rather
+// than by the ref it was saved as.
+type savedRun struct {
+	stamp string
+	refs  map[string]string
+}
+
+// backup is the snapshot a run saved, and whether this run is the one that
+// wrote it. A run whose refs already stand where an earlier run saved them
+// reuses that run's backup, which is not this run's to take away again.
+type backup struct {
+	stamp string
+	wrote bool
+}
 
 func listBackups(repo *gitexec.Repo) error {
 	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname:short)", backupPrefix)
@@ -26,6 +45,7 @@ func listBackups(repo *gitexec.Repo) error {
 		sayf("%s  refs/%s  %s\n", stamp, original, hash)
 	}
 	sayf("\nput one run back with: ai-attributions restore <timestamp>\n")
+	sayf("take them away with: ai-attributions clean, or clean --keep-last <n>\n")
 	return nil
 }
 
@@ -65,4 +85,211 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 	}
 	sayf("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
 	return nil
+}
+
+// cleanBackups is the clean command: one run where a timestamp names it, the
+// newest KeepLast runs where --keep-last bounds them, and every backup the
+// repository holds where neither says otherwise.
+func cleanBackups(repo *gitexec.Repo, cfg Config, stamp string) error {
+	runs, err := savedRuns(repo)
+	if err != nil {
+		return err
+	}
+	if len(runs) == 0 {
+		sayf("no backups saved\n")
+		return nil
+	}
+	// Ref completion offers a trailing slash, as it does to restore.
+	if stamp = strings.Trim(stamp, "/"); stamp != "" {
+		return cleanOneRun(repo, runs, stamp)
+	}
+
+	// Zero for the bare command, which takes every backup away.
+	keep := max(cfg.KeepLast, 0)
+	removed, err := pruneRuns(repo, runs, keep)
+	if err != nil {
+		return err
+	}
+	if removed == 0 {
+		sayf("nothing to remove: %d %s saved, and --keep-last asks for %d\n",
+			len(runs), plural(len(runs), "run", "runs"), keep)
+		return nil
+	}
+	sayf("\nremoved %d of %d saved %s\n", removed, len(runs), plural(len(runs), "run", "runs"))
+	return nil
+}
+
+// cleanOneRun takes away the backup one timestamp names, and reports a
+// timestamp that names none as a failure rather than as nothing to do.
+func cleanOneRun(repo *gitexec.Repo, runs []savedRun, stamp string) error {
+	for _, run := range runs {
+		if run.stamp != stamp {
+			continue
+		}
+		return removeRun(repo, run)
+	}
+	return fmt.Errorf("no backup saved under %s%s", backupPrefix, stamp)
+}
+
+// saveBackup records where each ref stands before the rewrite moves it, and
+// bounds what earlier runs left behind.
+//
+// Pruning happens here, at the start of a run, rather than once one has
+// finished or published: a backup is what restore puts back after a rewrite
+// that turned out to be wrong, and pushing that rewrite is what opens the
+// window in which someone reaches for it. The next run is what takes it away.
+func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
+	runs, err := savedRuns(repo)
+	if err != nil {
+		return backup{}, err
+	}
+
+	// A run whose refs stand exactly where the newest backup saved them has
+	// nothing new to record, so it reuses that one. Two copies of one snapshot
+	// spend a slot of the bound below on a run that could not be told from it.
+	if len(runs) > 0 && maps.Equal(runs[len(runs)-1].refs, saving) {
+		reused := runs[len(runs)-1]
+		sayf("the refs stand where %s%s/ saved them, so no second copy is written\n",
+			backupPrefix, reused.stamp)
+		if _, err := pruneRuns(repo, runs, defaultKeepRuns); err != nil {
+			return backup{}, err
+		}
+		return backup{stamp: reused.stamp}, nil
+	}
+
+	stamp := freeStamp(runs, time.Now())
+	for ref, hash := range saving {
+		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(ref, "refs/")); err != nil {
+			return backup{}, err
+		}
+	}
+	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
+	// One slot of the bound is this run's, so the earlier runs are pruned to
+	// one fewer.
+	if _, err := pruneRuns(repo, runs, defaultKeepRuns-1); err != nil {
+		return backup{}, err
+	}
+	return backup{stamp: stamp, wrote: true}, nil
+}
+
+// dropBackupIfUnused takes away the snapshot a run saved when the rewrite moved
+// nothing, there being no history to put back. Only the snapshot this run
+// wrote: a reused one belongs to the run that did write it, and that run moved
+// something.
+func dropBackupIfUnused(repo *gitexec.Repo, moved bool, saved backup) error {
+	if moved || !saved.wrote {
+		return nil
+	}
+	runs, err := savedRuns(repo)
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if run.stamp != saved.stamp {
+			continue
+		}
+		if err := repo.DeleteRefs(refsOf(run)); err != nil {
+			return err
+		}
+		sayf("\nno ref moved, so the backup saved above is taken away rather than kept as a copy of what is still there\n")
+		return nil
+	}
+	return nil
+}
+
+// pruneRuns removes every run but the newest keep, and reports how many it
+// removed. The runs are given rather than read, so a caller that has already
+// listed them prunes the state it decided against.
+func pruneRuns(repo *gitexec.Repo, runs []savedRun, keep int) (int, error) {
+	keep = max(keep, 0)
+	if len(runs) <= keep {
+		return 0, nil
+	}
+	removed := 0
+	for _, run := range runs[:len(runs)-keep] {
+		if err := removeRun(repo, run); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// removeRun takes one run's saved refs away and says so, naming the run rather
+// than every ref under it: what a backup is reached for is the run.
+func removeRun(repo *gitexec.Repo, run savedRun) error {
+	refs := refsOf(run)
+	if err := repo.DeleteRefs(refs); err != nil {
+		return err
+	}
+	sayf("removed %s (%d %s)\n", run.stamp, len(refs), plural(len(refs), "ref", "refs"))
+	return nil
+}
+
+// savedRuns returns every backup this tool has saved, oldest first. The
+// timestamps are fixed width and UTC, so ordering them as strings orders them
+// by time.
+func savedRuns(repo *gitexec.Repo) ([]savedRun, error) {
+	listing, err := repo.Output("for-each-ref", "--format=%(refname) %(objectname)", backupPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	byStamp := map[string]map[string]string{}
+	for line := range strings.SplitSeq(strings.TrimSpace(listing), "\n") {
+		ref, hash, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		saved, ok := strings.CutPrefix(ref, backupPrefix)
+		if !ok {
+			continue
+		}
+		stamp, original, ok := strings.Cut(saved, "/")
+		if !ok {
+			continue
+		}
+		if byStamp[stamp] == nil {
+			byStamp[stamp] = map[string]string{}
+		}
+		byStamp[stamp]["refs/"+original] = hash
+	}
+
+	runs := make([]savedRun, 0, len(byStamp))
+	for _, stamp := range slices.Sorted(maps.Keys(byStamp)) {
+		runs = append(runs, savedRun{stamp: stamp, refs: byStamp[stamp]})
+	}
+	return runs, nil
+}
+
+// refsOf returns the backup refs one run holds, which are the refs it saved
+// under its own timestamp rather than the refs it saved them for.
+func refsOf(run savedRun) []string {
+	refs := make([]string, 0, len(run.refs))
+	for ref := range run.refs {
+		refs = append(refs, backupPrefix+run.stamp+"/"+strings.TrimPrefix(ref, "refs/"))
+	}
+	return refs
+}
+
+// freeStamp returns the timestamp to save a run under: the time now, moved past
+// the newest run already saved where the clock has not got there yet. The
+// stamps are a second apart at best, so two rewrites in one second would
+// otherwise share one and the second would overwrite the first's refs where
+// they name the same branch. Moving on rather than reusing the second also
+// keeps the stamps ordered, which is what makes the last one the newest.
+func freeStamp(taken []savedRun, now time.Time) string {
+	stamp := now.UTC().Format(stampLayout)
+	if len(taken) == 0 {
+		return stamp
+	}
+	newest := taken[len(taken)-1].stamp
+	if stamp > newest {
+		return stamp
+	}
+	saved, err := time.Parse(stampLayout, newest)
+	if err != nil {
+		return stamp
+	}
+	return saved.Add(time.Second).Format(stampLayout)
 }

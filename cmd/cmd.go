@@ -54,6 +54,39 @@ var backups = &cobra.Command{
 	RunE:  func(c *cobra.Command, args []string) error { return run(c, cli.OpBackups, "", args) },
 }
 
+var clean = &cobra.Command{
+	Use:   "clean [timestamp] [repo-path...]",
+	Short: "Remove the pre-rewrite refs saved by earlier runs",
+	Long: "Remove backups: the refs one run saved where a timestamp names it,\n" +
+		"every run but the newest n where --keep-last bounds them, and every\n" +
+		"backup the repository holds where neither says so.\n\n" +
+		"apply prunes to the last 3 runs by itself, so this is for bounding the\n" +
+		"namespace to another number or emptying it. A backup keeps the\n" +
+		"pre-rewrite commits reachable; removing one takes the refs away and not\n" +
+		"the objects, which git gc expires on its own schedule.",
+	// The timestamp comes first where there is one, as restore's does, and a
+	// command line that named both it and --keep-last has asked for two
+	// different things.
+	Args: func(c *cobra.Command, args []string) error {
+		if !c.Flags().Changed("keep-last") {
+			return nil
+		}
+		if cfg.KeepLast < 0 {
+			return cli.Usagef("clean --keep-last takes a count, not %d", cfg.KeepLast)
+		}
+		if len(args) > 0 && cli.ValidStamp(args[0]) {
+			return cli.Usagef("clean takes a timestamp or --keep-last, not both")
+		}
+		return nil
+	},
+	RunE: func(c *cobra.Command, args []string) error {
+		if len(args) > 0 && cli.ValidStamp(args[0]) {
+			return run(c, cli.OpClean, args[0], args[1:])
+		}
+		return run(c, cli.OpClean, "", args)
+	},
+}
+
 var restore = &cobra.Command{
 	Use:   "restore <timestamp> [repo-path...]",
 	Short: "Put the refs saved by one run back",
@@ -123,6 +156,9 @@ func init() {
 	}
 	// --push rewrites the remote, so it belongs to apply alone.
 	apply.Flags().BoolVar(&cfg.Push, "push", false, "force push the rewritten refs")
+	// Zero by default, which is what the bare command asks for: every backup
+	// goes. A rewrite needs no flag at all to bound what it leaves behind.
+	clean.Flags().IntVar(&cfg.KeepLast, "keep-last", 0, "keep the newest `n` runs and remove the rest")
 
 	// A flag cobra could not parse is a wrong invocation, and exits 2 like one.
 	Cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error { return cli.Usage(err) })
@@ -133,7 +169,7 @@ func init() {
 	// The generated completion command still works when it is not listed, and
 	// this tool has too few commands to spend a line on it.
 	Cmd.CompletionOptions.HiddenDefaultCmd = true
-	Cmd.AddCommand(scan, apply, backups, restore, version)
+	Cmd.AddCommand(scan, apply, backups, clean, restore, version)
 	// Registered here rather than left to Execute, which is where cobra adds
 	// them: Args reads the command list before Execute runs, and a command
 	// missing from it is taken for a repo-path. Both are idempotent, so the

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 	"github.com/andornaut/ai-attributions/internal/rewrite"
@@ -19,7 +18,7 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 	if err := checkRewritable(repo, cfg); err != nil {
 		return false, err
 	}
-	targets, err := collectTargets(repo, cfg, refs, carried)
+	targets, saved, err := collectTargets(repo, cfg, refs, carried)
 	if err != nil {
 		return false, err
 	}
@@ -29,6 +28,9 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 	resolveRewritten(repo, targets)
 	reportRewritten(targets)
 	moved := anyMoved(targets)
+	if err := dropBackupIfUnused(repo, moved, saved); err != nil {
+		return moved, err
+	}
 
 	publish := publishable(targets)
 	if len(publish) == 0 {
@@ -101,30 +103,33 @@ func checkRewritable(repo *gitexec.Repo, cfg Config) error {
 }
 
 // collectTargets records where each ref pointed before the rewrite, along with
-// the remote value to hold the push lease against. Carried tags are backed up
-// with the refs in scope, so restore puts a repointed tag back too.
-func collectTargets(repo *gitexec.Repo, cfg Config, refs []string, carried []target) ([]target, error) {
-	stamp := time.Now().UTC().Format("20060102T150405Z")
+// the remote value to hold the push lease against, and hands the same reading
+// to the backup. Carried tags are backed up with the refs in scope, so restore
+// puts a repointed tag back too, and a tag has no reflog to be found in
+// otherwise.
+func collectTargets(repo *gitexec.Repo, cfg Config, refs []string, carried []target) ([]target, backup, error) {
 	targets := make([]target, 0, len(refs)+len(carried))
 	for _, ref := range refs {
 		targets = append(targets, target{ref: ref, publish: true})
 	}
 	targets = append(targets, carried...)
 
+	saving := make(map[string]string, len(targets))
 	for i, t := range targets {
 		hash, err := repo.Resolve(t.ref)
 		if err != nil {
-			return nil, err
+			return nil, backup{}, err
 		}
 		targets[i].hash = hash
 		targets[i].lease = leaseFor(repo, cfg.Remote, t.ref)
-
-		if err := repo.UpdateRef(hash, backupPrefix+stamp+"/"+strings.TrimPrefix(t.ref, "refs/")); err != nil {
-			return nil, err
-		}
+		saving[t.ref] = hash
 	}
-	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
-	return targets, nil
+
+	saved, err := saveBackup(repo, saving)
+	if err != nil {
+		return nil, backup{}, err
+	}
+	return targets, saved, nil
 }
 
 // leaseFor returns the commit the remote-tracking ref points at, which is what

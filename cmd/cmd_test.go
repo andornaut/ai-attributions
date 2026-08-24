@@ -43,7 +43,8 @@ func execute(t *testing.T, args ...string) (string, error) {
 func TestFlagsBelongToTheCommandsThatUseThem(t *testing.T) {
 	for _, flag := range []string{
 		"--agents-files", "--base=x", "--current-branch", "--emdashes",
-		"--exclude=x", "--exit-code", "--identity=x", "--push", "--quiet", "--verbose",
+		"--exclude=x", "--exit-code", "--identity=x", "--keep-last=1", "--push",
+		"--quiet", "--verbose",
 	} {
 		t.Run("backups "+flag, func(t *testing.T) {
 			_, err := execute(t, "backups", flag, ".")
@@ -124,6 +125,40 @@ func TestArgsLeavesEveryCommandAlone(t *testing.T) {
 		if !slices.Contains(names, want) {
 			t.Errorf("%s is not registered before Args reads the command list", want)
 		}
+	}
+}
+
+// clean names one run or bounds how many are kept, and a command line asking
+// for both has asked for two different things. A count below zero keeps no run
+// this side of the bare command, which already removes every backup.
+func TestCleanTakesATimestampOrABound(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "both",
+			args: []string{"clean", "--keep-last=1", "20260811T121757Z"},
+			want: "not both",
+		},
+		{
+			name: "a count below zero",
+			args: []string{"clean", "--keep-last=-2"},
+			want: "takes a count",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := execute(t, append(tt.args, t.TempDir())...)
+			if err == nil {
+				t.Fatalf("%q was accepted", tt.args)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("the error is %q, want it to name %q", err, tt.want)
+			}
+		})
 	}
 }
 

@@ -182,6 +182,14 @@ func reportUnleased(targets []target) {
 	}
 }
 
+// plural spells the noun for a count, so a report does not say "1 runs".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // sortedByCount orders a tally's keys by descending count.
 func sortedByCount(tally map[string]int) []string {
 	keys := make([]string, 0, len(tally))

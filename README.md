@@ -37,7 +37,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Forks](#forks) are skipped, and [remote branches](#refs-in-scope) reported but never rewritten
 - [Several repositories](#sweeping-several-repositories) in one run, with [`--quiet`](#quiet-runs) for a scheduled sweep
 - [`--exit-code`](#exit-status) for CI and pre-push hooks, and a [GitHub Action](#github-action)
-- [Backups](#backups) of the pre-rewrite refs, and `restore` to put one run back
+- [Backups](#backups) of the pre-rewrite refs, `restore` to put one run back, and `clean` to take them away
 
 ## Installation
 
@@ -67,10 +67,11 @@ Command | What it does
 `scan` | Report what would change, without changing it (the default)
 `apply` | Rewrite the history, and push it where `--push` asks
 `backups` | List the pre-rewrite refs saved by earlier runs
+`clean` | Remove the pre-rewrite refs saved by earlier runs
 `restore` | Put the refs saved by one run back
 `version` | Print the version
 
-`scan` and `apply` take the flags below, and `apply` adds `--push`. `backups` and `restore` take none, so a flag that means nothing to a command is refused there rather than ignored.
+`scan` and `apply` take the flags below, and `apply` adds `--push`. `backups` and `restore` take none of them and `clean` takes `--keep-last` alone, so a flag that means nothing to a command is refused there rather than ignored.
 
 Flag | What it does
 --- | ---
@@ -190,7 +191,7 @@ history that arrives from another project is not this repository's to rewrite
 
 A repository counts as a fork when it has a remote named `upstream` pointing at a different project, or another remote pointing at a different project that has been fetched from, measured against what the current branch's remote points at. URLs are compared as `host/owner/repo` with case folded.
 
-Nothing is reported, and under `--exit-code` the status is 3 rather than 0. `backups` and `restore` still work.
+Nothing is reported, and under `--exit-code` the status is 3 rather than 0. `backups`, `clean` and `restore` still work.
 
 ## Sweeping several repositories
 
@@ -224,7 +225,7 @@ Word | Meaning | Status
 `skipped` | a fork, whose history is not this repository's to rewrite | 3
 `failed` | the run could not finish, and the error is on stderr | 2
 
-Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw, whatever order the paths came in. `backups` and `restore` have no finding to summarize, so they print under the `=== <path>` heading only.
+Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw, whatever order the paths came in. `backups`, `clean` and `restore` have no finding to summarize, so they print under the `=== <path>` heading only.
 
 ## Quiet runs
 
@@ -234,7 +235,7 @@ Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw,
 0 4 * * * ai-attributions scan --quiet ~/src/github.com/andornaut/*
 ```
 
-A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`: its finding moves no status, so weighing the report by one would drop it. `--quiet` decides what is written, not what is reported, and `backups` and `restore` reject it.
+A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`: its finding moves no status, so weighing the report by one would drop it. `--quiet` decides what is written, not what is reported, and `backups`, `clean` and `restore` reject it.
 
 ## GitHub Action
 
@@ -285,12 +286,26 @@ $ ai-attributions backups
 20260811T054927Z  refs/heads/main  812479b
 
 put one run back with: ai-attributions restore <timestamp>
+take them away with: ai-attributions clean, or clean --keep-last <n>
 
 $ ai-attributions restore 20260811T054927Z
 refs/heads/main -> 812479bfcbdf
 
 restored. A published rewrite still needs a force push to undo on the remote
 ```
+
+A rewrite leaves the last 3 runs behind: it saves its own snapshot and prunes what earlier runs left to make room, so the namespace is bounded with no flag to remember. It prunes at the start of a run rather than at the end of one: a backup is what `restore` puts back after a rewrite that turned out to be wrong, and publishing that rewrite is what opens the window in which someone reaches for it, so the next run is what takes it away. A run whose refs stand where the newest backup saved them reuses that one instead of writing a second copy, and a rewrite that moves nothing takes its own snapshot away again.
+
+`clean` removes backups: the refs one run saved where a timestamp names it, every run but the newest with `--keep-last`, and every backup the repository holds where neither says so.
+
+```console
+$ ai-attributions clean --keep-last 1
+removed 20260811T054927Z (1 ref)
+
+removed 1 of 2 saved runs
+```
+
+Removing a backup takes the refs away and not the objects. A branch's pre-rewrite tip is still in its reflog, which `git gc` expires on its own schedule; `git reflog expire --expire=now --all && git gc --prune=now` takes both. A tag has no reflog, so its backup is the only record of where it stood.
 
 The push covers the refs the rewrite moved and only those, so a ref whose commits carried no change keeps its hash. Each is pushed with `--force-with-lease`: a branch leases against its remote-tracking ref, and a tag, having none, against its pre-rewrite commit read from `git ls-remote`. The push is `--atomic`, since half a published rewrite is a branch on new history beside a tag still naming the old.
 

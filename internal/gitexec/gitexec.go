@@ -378,6 +378,21 @@ func (r *Repo) UpdateRef(hash, ref string) error {
 	return err
 }
 
+// DeleteRefs removes refs, in one update rather than one per ref: a batch
+// leaves the namespace either as it was or as it was asked for, where a loop
+// can stop half way through the refs one run saved.
+func (r *Repo) DeleteRefs(refs []string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	var stdin bytes.Buffer
+	for _, ref := range refs {
+		fmt.Fprintf(&stdin, "delete %s\n", ref)
+	}
+	_, err := r.outputWithInput(&stdin, "update-ref", "--stdin")
+	return err
+}
+
 type Remote struct {
 	Name    string
 	URL     string

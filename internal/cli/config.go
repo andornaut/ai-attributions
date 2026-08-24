@@ -9,7 +9,19 @@ const (
 	identityNone = "none"
 )
 
-// stampRe matches the timestamp a backup is saved under.
+// defaultKeepRuns bounds the backup namespace: the number of runs whose
+// pre-rewrite refs a rewrite leaves behind. The oldest goes first, and across a
+// sequence of rewrites that is the one naming the history the first started
+// from, so this is how far back restore can reach. A run that moves nothing
+// leaves no snapshot, so these are three rewrites rather than three
+// invocations, and clean --keep-last asks for another number.
+const defaultKeepRuns = 3
+
+// stampLayout is how a backup's timestamp is spelled, and stampRe matches what
+// it spells. UTC and fixed width, so ordering the stamps as strings orders the
+// runs by time.
+const stampLayout = "20060102T150405Z"
+
 var stampRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
 type Config struct {
@@ -27,7 +39,12 @@ type Config struct {
 	Exclude       refPatterns
 	ExitCode      bool
 	Identity      string
-	Push          bool
+	// KeepLast is the number of runs clean keeps, and zero for the bare
+	// command, which takes every backup away. A rewrite prunes to
+	// defaultKeepRuns with no flag at all, so a bounded namespace is what a run
+	// leaves behind rather than something to remember to ask for.
+	KeepLast int
+	Push     bool
 	// Quiet holds the report back unless the run has something to answer for,
 	// which is what lets a scheduled run mail only the days that need one.
 	Quiet   bool
@@ -85,6 +102,7 @@ const (
 	OpScan Op = iota
 	OpApply
 	OpBackups
+	OpClean
 	OpRestore
 )
 
@@ -92,7 +110,7 @@ const (
 // it, which is what decides whether a run closes by saying what it did.
 func (o Op) rewrites() bool { return o == OpApply }
 
-// walksHistory reports whether the op looks for attributions at all. backups
-// and restore only move refs this tool saved, so they have no finding to
-// summarize and no scope to report one for.
+// walksHistory reports whether the op looks for attributions at all. backups,
+// clean and restore only read or move refs this tool saved, so they have no
+// finding to summarize and no scope to report one for.
 func (o Op) walksHistory() bool { return o == OpScan || o == OpApply }
