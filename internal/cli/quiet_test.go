@@ -119,6 +119,36 @@ func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
 	}
 }
 
+// A run whose only finding sits on a remote branch opens on that branch. A line
+// saying the refs in scope are clean reads as the answer, leaving the finding
+// under it to be read as an aside, so it is left out where the remote has
+// something to say and printed where it has not.
+func TestACleanWalkIsNotPrintedOverARemoteOnlyFinding(t *testing.T) {
+	elsewhere := remoteOnlyRepo(t)
+	report := captureReport(t, func() {
+		if _, err := runRepo(OpScan, Config{}, "", elsewhere.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(report, "no AI attributions in") {
+		t.Errorf("a clean line was printed above the only finding the run has:\n%s", report)
+	}
+	if !strings.Contains(report, "refs/remotes/origin/feature") {
+		t.Errorf("the report left out the branch it is printed for:\n%s", report)
+	}
+
+	tidy, git := gitRepo(t)
+	git("remote", "add", "origin", "https://github.com/example/thing.git")
+	quiet := captureReport(t, func() {
+		if _, err := runRepo(OpScan, Config{}, "", tidy.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(quiet, "no AI attributions in") {
+		t.Errorf("a run with nothing anywhere did not say the walk was clean:\n%s", quiet)
+	}
+}
+
 // A status the caller reads has to name a reason. Without --exit-code there is
 // no status to explain, so the same run stays silent.
 func TestQuietExplainsANonZeroStatus(t *testing.T) {

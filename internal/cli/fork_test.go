@@ -26,6 +26,10 @@ func gitRepo(t *testing.T) (*gitexec.Repo, func(args ...string)) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+	// The remotes these repositories are given are addresses, not hosts to
+	// reach: the refs a test writes by hand are what a fetch would have brought.
+	noFetch(t)
+
 	git("init", "--quiet", "--initial-branch=main")
 	git("config", "user.name", "Ada")
 	git("config", "user.email", "ada@example.com")
@@ -36,6 +40,21 @@ func gitRepo(t *testing.T) (*gitexec.Repo, func(args ...string)) {
 		t.Fatal(err)
 	}
 	return repo, git
+}
+
+// noFetch holds the network out of a run for the length of one test, and
+// reports the refs it was asked to refresh, which is the only part a test that
+// never reaches a remote can check.
+func noFetch(t *testing.T) *[]string {
+	t.Helper()
+	var asked []string
+	previous := fetchRemote
+	fetchRemote = func(_ *gitexec.Repo, remote string) error {
+		asked = append(asked, remote)
+		return nil
+	}
+	t.Cleanup(func() { fetchRemote = previous })
+	return &asked
 }
 
 // fetched gives a remote a remote-tracking ref, which is what a repository has

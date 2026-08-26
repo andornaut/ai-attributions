@@ -29,6 +29,16 @@ func sayf(format string, args ...any) {
 	_, _ = fmt.Fprintf(out, format, args...)
 }
 
+// sayBlockf writes a piece of the report held apart from what is above it by a
+// blank line. A piece with nothing above it opens the report, where that line
+// separates nothing and reads as an empty first line under the heading.
+func sayBlockf(format string, args ...any) {
+	if said {
+		sayf("\n")
+	}
+	sayf(format, args...)
+}
+
 // reportDone closes an apply that completed, so that a report ending without
 // this line is a run that stopped part way rather than one that finished with
 // little to say.

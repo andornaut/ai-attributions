@@ -55,7 +55,19 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	opts := clean.Options{Trailers: true, Emdashes: cfg.Emdashes}
 
 	found := inspect(opts, who, commits)
-	found.report(cfg.Verbose, scopeLabel(cfg, refs))
+	// Read before anything is printed, because what the remote carries decides
+	// whether a clean walk here is worth a line of its own. A remote branch
+	// sits outside a range rather than beside it, so a run given a base does
+	// not measure one against it.
+	var elsewhere remoteOnly
+	if cfg.Base == "" {
+		elsewhere, err = readRemoteOnly(repo, cfg, opts, who, refs)
+		if err != nil {
+			return outcomeClean, err
+		}
+	}
+
+	found.report(cfg.Verbose, elsewhere.carries(), scopeLabel(cfg, refs))
 	agents.report(cfg.Verbose)
 	moved, err := found.reportRadius(repo, cfg, refs)
 	if err != nil {
@@ -66,15 +78,7 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 		return outcomeClean, err
 	}
 	reportCarried(carried)
-	// A remote branch sits outside a range rather than beside it, so a run
-	// given a base does not measure one against it.
-	var outOfScope bool
-	if cfg.Base == "" {
-		outOfScope, err = reportRemoteOnly(repo, cfg, opts, who, refs)
-		if err != nil {
-			return outcomeClean, err
-		}
-	}
+	elsewhere.report()
 
 	if found.flagged == 0 {
 		reportNothingToRewrite(op)
@@ -82,7 +86,7 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 		// Nothing on the refs in scope, and a ref out of scope carrying
 		// something: the run ends on that rather than on clean, so a sweep's
 		// line names the repository and prints the report under it.
-		if ended == outcomeClean && outOfScope {
+		if ended == outcomeClean && elsewhere.any() {
 			ended = outcomeOutOfScope
 		}
 		return ended, nil

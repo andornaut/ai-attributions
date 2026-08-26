@@ -177,7 +177,8 @@ ai-attributions apply --base origin/main ~/src/example  # rewrite the commits th
 
 - `--base ref` narrows those refs to the commits they add over `ref`, leaving the rest out of the walk, the counts and `--exit-code`. A commit the base already carries keeps its message, identity and hash.
 - A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. A tag `--exclude` matched is repointed locally and left out of the push.
-- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`. Remote-tracking refs are read rather than the remote, so a ref is only as current as the last fetch, and `git fetch --prune` drops any whose branch is gone. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
+- Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`, and a repository whose refs in scope are clean says so only where the remote has nothing to report, so the branch is not left under a line that reads as the answer. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
+- The remote is fetched first, with `--prune --no-tags`: a branch deleted since the last fetch is not reported as one to go and clean, one pushed since is, and the refs in scope are left where they are. A remote that cannot be reached is reported, and the refs already here answer for it, an unreachable host being no reason to refuse a rewrite of local history.
 
 ## Forks
 
@@ -208,9 +209,7 @@ skipped      /home/andornaut/src/github.com/andornaut/qmk_firmware
 2 of 5 commits carry AI attributions, across refs/heads/main
 
 === /home/andornaut/src/github.com/andornaut/mrs
-no AI attributions in 160 commits, across refs/heads/main
-
-not in scope, and not counted above: remote branches carrying AI attributions
+remote branches carrying AI attributions, outside the refs in scope and counted in no status
      3 of 3 commits  refs/remotes/origin/agent-work
 ```
 

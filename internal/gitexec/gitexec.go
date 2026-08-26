@@ -331,6 +331,16 @@ func (r *Repo) RemoteRefs(remote string) ([]string, error) {
 	return refs, nil
 }
 
+// Fetch updates the remote-tracking refs for a remote and drops any whose
+// branch is gone on the remote, so a report reading them answers for what the
+// remote holds now rather than for what the last fetch happened to leave here.
+// --no-tags keeps the refs in scope where they are: this refreshes the remote's
+// side, and pulling in tags would widen what the run answers for.
+func (r *Repo) Fetch(remote string) error {
+	_, err := r.Output("fetch", "--quiet", "--prune", "--no-tags", remote)
+	return err
+}
+
 // RemoteValues returns the commit each of the named refs points at on the
 // remote, read over the network. A tag has no remote-tracking ref to read
 // instead, and a ref the remote does not carry is left out of the map rather

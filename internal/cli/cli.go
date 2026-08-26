@@ -201,7 +201,10 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 		if strings.TrimSpace(r.report) == "" {
 			continue
 		}
-		sayf("\n=== %s\n%s", r.path, r.report)
+		// Trimmed because a report's first block was separated from the
+		// sweep's lines rather than from a block of its own, and under a
+		// heading that separation is an empty line.
+		sayf("\n=== %s\n%s", r.path, strings.TrimLeft(r.report, "\n"))
 	}
 
 	// Worst first, and decided by what the sweep saw rather than by which

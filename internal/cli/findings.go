@@ -130,10 +130,15 @@ func mapping(field, name, address string, who identity) string {
 }
 
 // report prints the tallies, and every commit behind them under -verbose.
-// scope names the history the counts answer for.
-func (f findings) report(verbose bool, scope string) {
+// scope names the history the counts answer for. elsewhere drops the line a
+// clean walk would otherwise print: a run whose only finding sits on a ref out
+// of scope opens on that finding, rather than on a clean line the reader has to
+// get past to reach it.
+func (f findings) report(verbose, elsewhere bool, scope string) {
 	if f.flagged == 0 {
-		sayf("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
+		if !elsewhere {
+			sayf("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
+		}
 		f.reportSkipped()
 		return
 	}
@@ -322,20 +327,58 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 	return moved, nil
 }
 
-// reportRemoteOnly names remote branches that carry attributions and are not
-// covered by the refs in scope, rather than rewriting refs the tool was not
-// pointed at. It reads remote-tracking refs, so a scan needs no network.
-// Nothing it finds counts toward the run's findings or its exit code, which
-// answer for the refs in scope, the same set apply rewrites. It reports whether
-// it named anything, which is what the run ends on when the refs in scope had
-// nothing to say.
-func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who identity, localRefs []string) (bool, error) {
+// remoteOnly is what the remote carries that the refs in scope do not answer
+// for. Nothing here counts toward the run's findings or its exit code, which
+// answer for the refs in scope, the same set apply rewrites.
+type remoteOnly struct {
+	// branches carry attributions and are not reached by the refs in scope.
+	branches []string
+	// stale name history an apply here has already rewritten, which is a push
+	// that has not happened rather than a branch of its own to go and clean.
+	stale []string
+	// fetchErr is the failure that left the refs below as of the last fetch,
+	// and nil for a remote that answered.
+	fetchErr error
+
+	remote  string
+	subject string
+}
+
+// any reports whether there is anything to say, a failed fetch included. A run
+// whose refs in scope were clean ends on this rather than on clean, so a sweep
+// names the repository and prints the report under it: a remote answered from
+// the last fetch is as much a thing to go and do as a branch to clean.
+func (r remoteOnly) any() bool {
+	return r.carries() || r.fetchErr != nil
+}
+
+// carries reports whether the remote holds work of its own, which is the case
+// a clean line about the refs in scope would be read past rather than read.
+func (r remoteOnly) carries() bool {
+	return len(r.branches) > 0 || len(r.stale) > 0
+}
+
+// fetchRemote refreshes a remote before its refs are read. Held in a variable
+// so the tests can exercise the report against remotes that were never meant to
+// be reachable.
+var fetchRemote = (*gitexec.Repo).Fetch
+
+// readRemoteOnly reads what the remote carries beyond the refs in scope, rather
+// than rewriting refs the tool was not pointed at. The remote is fetched first,
+// so a branch deleted since the last fetch is not reported as one to go and
+// clean and one pushed since is. A remote that cannot be reached is reported
+// rather than failed on: the refs already here still answer for what was last
+// seen, and a rewrite is local work that an unreachable host is no reason to
+// refuse.
+func readRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who identity, localRefs []string) (remoteOnly, error) {
+	found := remoteOnly{remote: cfg.Remote, subject: subject(opts.Emdashes)}
 	if !repo.HasRemote(cfg.Remote) {
-		return false, nil
+		return remoteOnly{}, nil
 	}
+	found.fetchErr = fetchRemote(repo, cfg.Remote)
 	remoteRefs, err := repo.RemoteRefs(cfg.Remote)
 	if err != nil {
-		return false, err
+		return remoteOnly{}, err
 	}
 
 	// A ref left behind by this tool's own rewrite is separated out below, so
@@ -343,11 +386,10 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 	// own to go and clean.
 	saved := rewrittenHere(repo)
 
-	var lines, stale []string
 	for _, ref := range remoteRefs {
 		excluded, err := cfg.Exclude.matches(ref)
 		if err != nil {
-			return false, err
+			return remoteOnly{}, err
 		}
 		if excluded {
 			continue
@@ -356,44 +398,44 @@ func reportRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who id
 		// unreadable branch does not read as a clean one.
 		commits, err := repo.CommitsNotIn(localRefs, []string{ref})
 		if err != nil {
-			lines = append(lines, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))
+			found.branches = append(found.branches, fmt.Sprintf("%6s  %s (%v)", "?", ref, err))
 			continue
 		}
 		if len(commits) == 0 {
 			continue
 		}
-		if found := inspect(opts, who, commits); found.flagged > 0 {
+		if got := inspect(opts, who, commits); got.flagged > 0 {
 			if hash, err := repo.Resolve(ref); err == nil &&
 				saved[rewrittenKey(strings.TrimPrefix(ref, "refs/remotes/"+cfg.Remote+"/"), hash)] {
-				stale = append(stale, ref)
+				found.stale = append(found.stale, ref)
 				continue
 			}
-			lines = append(lines, fmt.Sprintf("%6d of %d commits  %s",
-				found.flagged, len(commits), ref))
+			found.branches = append(found.branches, fmt.Sprintf("%6d of %d commits  %s",
+				got.flagged, len(commits), ref))
 		}
 	}
+	return found, nil
+}
 
-	// Both blocks below name work that is still to do on a ref that was not in
-	// scope, so neither moves the status. Reporting that they said something is
-	// what keeps a sweep from printing "clean" over the only finding a run has.
-	if len(stale) > 0 {
-		sayf("\nnaming history this repository has already rewritten locally: %s\n",
-			strings.Join(stale, ", "))
+// report names the work that is still to do on a ref that was not in scope.
+// None of it moves the status, so the report is the only place it is said.
+func (r remoteOnly) report() {
+	if r.fetchErr != nil {
+		sayBlockf("could not fetch %s, so the remote is reported as of the last fetch: %v\n",
+			r.remote, r.fetchErr)
+	}
+	if len(r.stale) > 0 {
+		sayBlockf("naming history this repository has already rewritten locally: %s\n",
+			strings.Join(r.stale, ", "))
 		sayf("pushing the rewrite settles these; until then the remote still holds what it started from\n")
 	}
-	if len(lines) == 0 {
-		return len(stale) > 0, nil
+	if len(r.branches) == 0 {
+		return
 	}
-
-	sayf("\nnot in scope, and not counted above: remote branches carrying %s\n", subject(opts.Emdashes))
-	for _, line := range lines {
+	sayBlockf("remote branches carrying %s, outside the refs in scope and counted in no status\n", r.subject)
+	for _, line := range r.branches {
 		sayf("%s\n", line)
 	}
-	sayf("check one out to bring it into scope: git switch -c <name> %s/<name>\n", cfg.Remote)
-	// The cause is not knowable without the network, and a scan does not use
-	// it, so the mechanism is stated rather than one guess at which it is.
-	sayf("a remote-tracking ref is only as current as the last fetch; git fetch --prune drops any whose branch is gone\n")
-	return true, nil
 }
 
 // rewrittenHere returns the branches this tool has rewritten, each keyed with

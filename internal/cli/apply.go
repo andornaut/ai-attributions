@@ -38,7 +38,8 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 		return moved, nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
-	// really cannot hold the remote to. Only a push uses the network.
+	// really cannot hold the remote to. The values come off the remote itself,
+	// so they are read only where there is a push to hold to them.
 	if cfg.Push {
 		if err := leaseRemote(repo, cfg.Remote, publish); err != nil {
 			return moved, err

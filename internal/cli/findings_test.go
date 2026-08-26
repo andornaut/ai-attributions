@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -153,7 +154,7 @@ func TestEmdashOnlyCommitsAreRewritten(t *testing.T) {
 func TestReportNamesEmdashesOnlyWhenAskedFor(t *testing.T) {
 	commits := []gitexec.Commit{commit(person, "e1", "tidy the parser — it was unreadable\n")}
 
-	report := captureReport(t, func() { inspect(all, who, commits).report(false, "refs/heads/main") })
+	report := captureReport(t, func() { inspect(all, who, commits).report(false, false, "refs/heads/main") })
 	if !strings.Contains(report, "1 of 1 commits carry AI attributions or dashes") {
 		t.Errorf("report did not count the emdash as a finding:\n%s", report)
 	}
@@ -162,7 +163,7 @@ func TestReportNamesEmdashesOnlyWhenAskedFor(t *testing.T) {
 	}
 
 	quiet := captureReport(t, func() {
-		inspect(clean.Options{Trailers: true}, who, commits).report(false, "refs/heads/main")
+		inspect(clean.Options{Trailers: true}, who, commits).report(false, false, "refs/heads/main")
 	})
 	if !strings.Contains(quiet, "no AI attributions in 1 commits") {
 		t.Errorf("report named emdashes without --emdashes:\n%s", quiet)
@@ -234,8 +235,8 @@ func captureReport(t *testing.T, run func()) string {
 // A remote-tracking ref left pointing at history this tool already rewrote is a
 // push that has not happened, not a branch carrying attributions of its own. The
 // cause is only knowable from the backup the rewrite saved, so a run that cannot
-// see one states the mechanism rather than guessing at which cause it is.
-func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
+// see one reports the branch rather than guessing at which cause it is.
+func TestRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	repo, git := gitRepo(t)
 	git("remote", "add", "origin", "git@github.com:andornaut/example.git")
 	git("commit", "--quiet", "--allow-empty", "--message=attributed\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
@@ -253,47 +254,89 @@ func TestReportRemoteOnlySeparatesRewrittenHistory(t *testing.T) {
 	cfg := Config{Remote: "origin"}
 	opts := clean.Options{Trailers: true}
 	refs := []string{"refs/heads/main"}
+	reported := func() string {
+		t.Helper()
+		return captureReport(t, func() {
+			found, err := readRemoteOnly(repo, cfg, opts, who, refs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found.report()
+		})
+	}
 
-	report := captureReport(t, func() {
-		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(report, "not in scope") {
-		t.Errorf("with no backup saved, reportRemoteOnly() did not list the branch:\n%s", report)
+	report := reported()
+	if !strings.Contains(report, "remote branches carrying") {
+		t.Errorf("with no backup saved, readRemoteOnly() did not list the branch:\n%s", report)
 	}
 	if strings.Contains(report, "already rewritten") {
-		t.Errorf("with no backup saved, reportRemoteOnly() claimed a rewrite it cannot see:\n%s", report)
+		t.Errorf("with no backup saved, readRemoteOnly() claimed a rewrite it cannot see:\n%s", report)
 	}
 
 	// The record the rewrite leaves behind is what makes the cause knowable.
 	git("update-ref", "refs/ai-attributions-backup/20260811T000000Z/heads/main", attributed)
 
-	report = captureReport(t, func() {
-		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
-			t.Fatal(err)
-		}
-	})
+	report = reported()
 	if !strings.Contains(report, "already rewritten") {
-		t.Errorf("reportRemoteOnly() did not name the ref as one this repository rewrote:\n%s", report)
+		t.Errorf("readRemoteOnly() did not name the ref as one this repository rewrote:\n%s", report)
 	}
-	if strings.Contains(report, "not in scope") {
-		t.Errorf("reportRemoteOnly() reported rewritten history as a branch to go and clean:\n%s", report)
+	if strings.Contains(report, "remote branches carrying") {
+		t.Errorf("readRemoteOnly() reported rewritten history as a branch to go and clean:\n%s", report)
 	}
 
 	// A different branch sitting on main's old tip is not settled by pushing
 	// main, so matching the commit alone would suppress a branch nothing cleans.
 	git("update-ref", "refs/remotes/origin/topic", attributed)
 
-	report = captureReport(t, func() {
-		if _, err := reportRemoteOnly(repo, cfg, opts, who, refs); err != nil {
-			t.Fatal(err)
-		}
-	})
+	report = reported()
 	if !strings.Contains(report, "refs/remotes/origin/topic") {
-		t.Errorf("reportRemoteOnly() left out a branch that only shares main's pre-rewrite tip:\n%s", report)
+		t.Errorf("readRemoteOnly() left out a branch that only shares main's pre-rewrite tip:\n%s", report)
 	}
-	if !strings.Contains(report, "not in scope") {
-		t.Errorf("reportRemoteOnly() did not report the other branch as one to go and clean:\n%s", report)
+	if !strings.Contains(report, "remote branches carrying") {
+		t.Errorf("readRemoteOnly() did not report the other branch as one to go and clean:\n%s", report)
+	}
+}
+
+// A remote-tracking ref is only as current as the last fetch, so the run makes
+// that fetch rather than reporting refs that may name branches the remote no
+// longer has.
+func TestRemoteOnlyFetchesBeforeItReads(t *testing.T) {
+	repo, git := gitRepo(t)
+	asked := noFetch(t)
+	git("remote", "add", "origin", "git@github.com:andornaut/example.git")
+
+	if _, err := readRemoteOnly(repo, Config{Remote: "origin"}, clean.Options{Trailers: true},
+		who, []string{"refs/heads/main"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*asked) != 1 || (*asked)[0] != "origin" {
+		t.Errorf("readRemoteOnly() fetched %v, want [origin]", *asked)
+	}
+}
+
+// A remote that cannot be reached leaves the refs already here to answer with,
+// which is a report worth printing and not a run to fail: an apply rewrites
+// local history, and an unreachable host is no reason to refuse it. What the
+// report cannot do is pass stale refs off as current.
+func TestRemoteOnlyReportsAFetchItCouldNotMake(t *testing.T) {
+	repo := remoteOnlyRepo(t)
+	previous := fetchRemote
+	fetchRemote = func(*gitexec.Repo, string) error { return errors.New("host is unreachable") }
+	t.Cleanup(func() { fetchRemote = previous })
+
+	found, err := readRemoteOnly(repo, Config{Remote: "origin"}, clean.Options{Trailers: true},
+		who, []string{"refs/heads/main"})
+	if err != nil {
+		t.Fatalf("readRemoteOnly() failed over a remote it could not reach: %v", err)
+	}
+	report := captureReport(t, found.report)
+	if !strings.Contains(report, "could not fetch origin") {
+		t.Errorf("the report read stale refs without saying so:\n%s", report)
+	}
+	if !strings.Contains(report, "refs/remotes/origin/feature") {
+		t.Errorf("a failed fetch took the branches already here down with it:\n%s", report)
+	}
+	if !found.any() {
+		t.Error("a run answering from the last fetch ended as one with nothing to say")
 	}
 }
