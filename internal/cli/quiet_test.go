@@ -250,10 +250,13 @@ func TestAnUnreachableRemoteIsNotAFinding(t *testing.T) {
 		t.Errorf("an unreachable remote exited %d, want 0", status)
 	}
 
-	got, err := runRepo(OpScan, Config{}, "", repo.Dir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	var got result
+	captureReport(t, func() {
+		var err error
+		if got, err = runRepo(OpScan, Config{}, "", repo.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if got.ended != outcomeNotFetched {
 		t.Errorf("outcome is %v, want %v", got.ended, outcomeNotFetched)
 	}

@@ -365,16 +365,10 @@ type remoteOnly struct {
 	subject string
 }
 
-// any reports whether there is anything to say, a failed fetch included. A run
-// whose refs in scope were clean ends on this rather than on clean, so a sweep
-// names the repository and prints the report under it: a remote answered from
-// the last fetch is as much a thing to go and do as a branch to clean.
-func (r remoteOnly) any() bool {
-	return r.carries() || r.fetchErr != nil
-}
-
 // carries reports whether the remote holds work of its own, which is the case
-// a clean line about the refs in scope would be read past rather than read.
+// a clean line about the refs in scope would be read past rather than read. It
+// is read beside fetchErr rather than folded in with it: a branch found on the
+// remote and a remote that was never read end the run on different words.
 func (r remoteOnly) carries() bool {
 	return len(r.branches) > 0 || len(r.stale) > 0
 }

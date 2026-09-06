@@ -502,3 +502,36 @@ func TestExcludedRefsAreNamedInOneLine(t *testing.T) {
 		t.Errorf("refs in scope are %v, want the branch alone", refs)
 	}
 }
+
+// A rewrite with nowhere to push says which remotes there are rather than
+// naming the one that is missing: the fallback is origin, so a repository whose
+// only remote is called something else has a name to push to and not an absence.
+func TestNoRemoteNamesTheRemotesThereAre(t *testing.T) {
+	tests := []struct {
+		name    string
+		remotes []string
+		want    string
+	}{
+		{
+			name: "no remote at all",
+			want: "the repository has no remote to push it to",
+		},
+		{
+			name:    "remotes, none by the name this run would push to",
+			remotes: []string{"gh", "mirror"},
+			want:    "the repository has no remote named origin, so push to gh and mirror by hand",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, git := gitRepo(t)
+			for _, remote := range tt.remotes {
+				git("remote", "add", remote, "git@github.com:example/"+remote+".git")
+			}
+			if got := noRemote(repo, "origin"); got != tt.want {
+				t.Errorf("noRemote() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -39,7 +39,10 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (result, error) {
 		return result{}, err
 	}
 	if len(commits) == 0 {
-		if cfg.Base == "" {
+		// A base narrows refs that are in scope, so a run left with none has
+		// nothing to measure against it and says only that there was nothing
+		// to walk.
+		if cfg.Base == "" || len(refs) == 0 {
 			sayf("no commits to inspect\n")
 		} else {
 			sayf("no commits to inspect: %s %s nothing over %s\n",

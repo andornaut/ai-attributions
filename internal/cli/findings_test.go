@@ -370,7 +370,7 @@ func TestRemoteOnlyReportsAFetchItCouldNotMake(t *testing.T) {
 	if !strings.Contains(report, "refs/remotes/origin/feature") {
 		t.Errorf("a failed fetch took the branches already here down with it:\n%s", report)
 	}
-	if !found.any() {
-		t.Error("a run answering from the last fetch ended as one with nothing to say")
+	if found.fetchErr == nil {
+		t.Error("the failed fetch was not carried, so the run cannot say it did not look")
 	}
 }

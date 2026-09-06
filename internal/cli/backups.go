@@ -110,9 +110,11 @@ func cleanBackups(repo *gitexec.Repo, cfg Config, stamp string) error {
 			len(runs), plural(len(runs), "run", "runs"), keep)
 		return nil
 	}
-	// Only where the lines above do not already say it: removing one run
-	// prints one line, and a tally of it would be the same fact twice.
-	if removed > 1 {
+	// Left out where the line above already says it: one run removed by the
+	// bare command, which takes every backup away, is the same fact twice.
+	// --keep-last keeps it whatever the count, being the only confirmation of
+	// the bound it was asked to apply.
+	if removed > 1 || keep > 0 {
 		sayf("\nremoved %d of %d saved %s\n", removed, len(runs), plural(len(runs), "run", "runs"))
 	}
 	return nil

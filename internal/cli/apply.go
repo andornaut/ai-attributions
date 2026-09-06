@@ -37,11 +37,12 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 		reportDonef("no ref moved, so there is nothing to push")
 		return moved, nil
 	}
-	// A repository with no remote has nowhere to publish to, so it is told
-	// that rather than handed a push command naming a remote that does not
-	// exist. --push has already failed on this in checkRewritable.
+	// A push command naming a remote that is not there is not a command to
+	// run, so a repository without the one this run would push to is told
+	// which remotes it has instead. --push has already failed on this in
+	// checkRewritable.
 	if !repo.HasRemote(cfg.Remote) {
-		reportDonef("the history is rewritten here; there is no %s remote to push it to", cfg.Remote)
+		reportDonef("the history is rewritten here; %s", noRemote(repo, cfg.Remote))
 		return moved, nil
 	}
 	// Read before reporting, so what is named as unleased is what the push
@@ -66,6 +67,23 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 		strings.Join(pushArgs(cfg.Remote, publish), " "))
 	reportDonef("the history is rewritten here, and not pushed")
 	return moved, nil
+}
+
+// noRemote says why there is nothing to push to: no remote at all, or none by
+// the name this run would have pushed to, which the remotes that do exist are
+// the answer to. A repository whose branch tracks nothing falls back to origin,
+// so a remote named anything else is a name to pass rather than an absence.
+func noRemote(repo *gitexec.Repo, remote string) string {
+	remotes, err := repo.Remotes()
+	if err != nil || len(remotes) == 0 {
+		return "the repository has no remote to push it to"
+	}
+	names := make([]string, 0, len(remotes))
+	for _, r := range remotes {
+		names = append(names, r.Name)
+	}
+	return fmt.Sprintf("the repository has no remote named %s, so push to %s by hand",
+		remote, joinAnd(names))
 }
 
 // refSpecs names the history git-filter-repo is pointed at. filter-repo
