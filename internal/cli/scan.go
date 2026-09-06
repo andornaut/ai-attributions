@@ -12,14 +12,14 @@ import (
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
-func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
+func scan(repo *gitexec.Repo, op Op, cfg Config) (result, error) {
 	who, err := targetIdentity(repo, op, cfg)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	refs, err := targetRefs(repo, cfg)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	// A question about the trees at the tips, so it is asked of the refs
 	// themselves rather than of the commits in range: a base that narrows the
@@ -30,13 +30,13 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	if cfg.AgentsFiles {
 		agents, err = inspectAgentFiles(repo, refs)
 		if err != nil {
-			return outcomeClean, err
+			return result{}, err
 		}
 	}
 
 	commits, err := commitsInScope(repo, cfg, refs)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	if len(commits) == 0 {
 		if cfg.Base == "" {
@@ -47,7 +47,7 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 		}
 		agents.report(cfg.Verbose)
 		reportNothingToRewrite(op)
-		return agents.outcome(), nil
+		return result{ended: agents.outcome(), heldRefs: agents.held(cfg.Verbose), agentPaths: agents.paths()}, nil
 	}
 	// Trailers are the point of the tool. Emdashes and endashes are asked for,
 	// and asking is what makes one a finding: a run that reports a dash rewrites
@@ -63,39 +63,48 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	if cfg.Base == "" {
 		elsewhere, err = readRemoteOnly(repo, cfg, opts, who, refs)
 		if err != nil {
-			return outcomeClean, err
+			return result{}, err
 		}
 	}
 
-	found.report(cfg.Verbose, elsewhere.carries(), scopeLabel(cfg, refs))
+	found.report(cfg.Verbose, elsewhere.carries(), scopeLabel(cfg, refs, cfg.Verbose))
 	agents.report(cfg.Verbose)
 	moved, err := found.reportRadius(repo, cfg, refs)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	carried, err := carriedTags(repo, cfg, refs, moved)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	reportCarried(carried)
 	elsewhere.report()
 
+	// What the run walked and what it held back, which the summary says once
+	// for the run rather than once per repository.
+	got := result{
+		walked:      found.commits,
+		flagged:     found.flagged,
+		heldCommits: found.held(cfg.Verbose),
+		heldRefs:    agents.held(cfg.Verbose),
+		agentPaths:  agents.paths(),
+	}
+
 	if found.flagged == 0 {
 		reportNothingToRewrite(op)
-		ended := agents.outcome()
+		got.ended = agents.outcome()
 		// Nothing on the refs in scope, and a ref out of scope carrying
 		// something: the run ends on that rather than on clean, so a sweep's
 		// line names the repository and prints the report under it.
-		if ended == outcomeClean && elsewhere.any() {
-			ended = outcomeOutOfScope
+		if got.ended == outcomeClean && elsewhere.any() {
+			got.ended = outcomeOutOfScope
 		}
-		return ended, nil
+		return got, nil
 	}
 	if !op.rewrites() {
-		if len(found.changes) > 0 {
-			sayf("\nnothing was rewritten. Run apply to rewrite the history\n")
-		}
-		return outcomeFound, nil
+		got.ended = outcomeFound
+		got.rewritable = len(found.changes) > 0
+		return got, nil
 	}
 	// A rewrite that succeeded still reports what it found, so that a job can
 	// tell a run that had to change something from one that had nothing to do.
@@ -103,12 +112,13 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (outcome, error) {
 	// the history where it was and stays found.
 	rewrote, err := apply(repo, cfg, refs, carried, found.changes)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
+	got.ended = outcomeFound
 	if rewrote {
-		return outcomeRewrote, nil
+		got.ended = outcomeRewrote
 	}
-	return outcomeFound, nil
+	return got, nil
 }
 
 // carriedTags returns the tags that name a commit the rewrite moves and are not
@@ -286,10 +296,47 @@ func commitsInScope(repo *gitexec.Repo, cfg Config, refs []string) ([]gitexec.Co
 
 // scopeLabel names the refs a report answers for and the base they were
 // measured against, so a count cannot be read as covering more than was walked.
-func scopeLabel(cfg Config, refs []string) string {
-	scope := strings.Join(refs, ", ")
+func scopeLabel(cfg Config, refs []string, verbose bool) string {
+	scope := joinAnd(refScope(refs, verbose))
 	if cfg.Base == "" {
 		return scope
 	}
 	return scope + " since " + cfg.Base
+}
+
+// maxNamedRefs is how many refs of one kind the scope line names before it
+// counts them instead. A repository with twenty releases would otherwise spend
+// the line on their names, which is what makes the counts beneath it hard to
+// find. --verbose names every one.
+const maxNamedRefs = 4
+
+// refScope is how the scope line spells the refs it answers for: branches and
+// tags by the names they are known by, and either kind counted once there are
+// more of them than the line is worth.
+func refScope(refs []string, verbose bool) []string {
+	var branches, tags, other []string
+	for _, ref := range refs {
+		switch {
+		case strings.HasPrefix(ref, "refs/heads/"):
+			branches = append(branches, shortRef(ref))
+		case strings.HasPrefix(ref, "refs/tags/"):
+			tags = append(tags, shortRef(ref))
+		default:
+			other = append(other, ref)
+		}
+	}
+	if verbose {
+		return append(append(branches, tags...), other...)
+	}
+	named := namedOrCounted(branches, "branches")
+	named = append(named, namedOrCounted(tags, "tags")...)
+	return append(named, namedOrCounted(other, "other refs")...)
+}
+
+// namedOrCounted names a handful of refs and counts a crowd of them.
+func namedOrCounted(names []string, many string) []string {
+	if len(names) > maxNamedRefs {
+		return []string{fmt.Sprintf("%d %s", len(names), many)}
+	}
+	return names
 }

@@ -95,12 +95,12 @@ func TestAgentFilesAreReportedOnlyWhenAskedFor(t *testing.T) {
 	stage(t, repo, git, "Add the project", "AGENTS.md", "README.md")
 
 	quiet := captureReport(t, func() {
-		ended, err := runRepo(OpScan, Config{}, "", repo.Dir())
+		got, err := runRepo(OpScan, Config{}, "", repo.Dir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ended != outcomeClean {
-			t.Errorf("outcome is %v, want %v", ended, outcomeClean)
+		if got.ended != outcomeClean {
+			t.Errorf("outcome is %v, want %v", got.ended, outcomeClean)
 		}
 	})
 	if strings.Contains(quiet, "AGENTS.md") {
@@ -108,12 +108,12 @@ func TestAgentFilesAreReportedOnlyWhenAskedFor(t *testing.T) {
 	}
 
 	asked := captureReport(t, func() {
-		ended, err := runRepo(OpScan, Config{AgentsFiles: true}, "", repo.Dir())
+		got, err := runRepo(OpScan, Config{AgentsFiles: true}, "", repo.Dir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ended != outcomeFound {
-			t.Errorf("outcome is %v, want %v", ended, outcomeFound)
+		if got.ended != outcomeFound {
+			t.Errorf("outcome is %v, want %v", got.ended, outcomeFound)
 		}
 	})
 	if !strings.Contains(asked, "AGENTS.md") {
@@ -131,11 +131,6 @@ func TestAgentFilesReportCountsRefsAndNamesTheFix(t *testing.T) {
 	for _, want := range []string{
 		"     2  AGENTS.md",
 		"     1  .cursor/rules",
-		// The report carries its own verdict, since the counts above it answer
-		// for commits and can be clean while this exits 1.
-		"--exit-code exits 1",
-		"git rm -r --cached AGENTS.md",
-		"pass --verbose to list the refs behind these counts",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report is missing %q:\n%s", want, report)
@@ -149,7 +144,30 @@ func TestAgentFilesReportCountsRefsAndNamesTheFix(t *testing.T) {
 	if !strings.Contains(verbose, "refs/tags/v1.0.0") {
 		t.Errorf("--verbose did not name the refs behind a count:\n%s", verbose)
 	}
-	if strings.Contains(verbose, "pass --verbose") {
-		t.Errorf("--verbose asked for itself:\n%s", verbose)
+}
+
+// What to do about an instruction file is the summary's to say, once for the
+// run: the counts answer for commits and can be clean while this exits 1, and
+// no rewrite this tool makes takes a file out of a tree.
+func TestSummaryNamesTheAgentFileFix(t *testing.T) {
+	run := newSummary(OpScan, Config{AgentsFiles: true})
+	run.add(result{ended: outcomeFound, agentPaths: []string{"AGENTS.md"}, heldRefs: true}, true)
+
+	report := captureReport(t, run.report)
+	for _, want := range []string{
+		"1 repository: 1 found",
+		"--exit-code exits 1",
+		"git rm -r --cached AGENTS.md",
+		"pass --verbose to list the refs behind these counts",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the summary is missing %q:\n%s", want, report)
+		}
+	}
+
+	quiet := newSummary(OpScan, Config{AgentsFiles: true, Verbose: true})
+	quiet.add(result{ended: outcomeFound, agentPaths: []string{"AGENTS.md"}}, true)
+	if report := captureReport(t, quiet.report); strings.Contains(report, "pass --verbose") {
+		t.Errorf("--verbose asked for itself:\n%s", report)
 	}
 }

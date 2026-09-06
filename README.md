@@ -9,7 +9,7 @@ Strips AI attributions out of a repository's git history: co-author and session 
 
 ```console
 $ ai-attributions --emdashes ~/src/example
-2 of 5 commits carry AI attributions or dashes, across refs/heads/main
+2 of 5 commits carry AI attributions or dashes, across main
 
 removed lines
      2  Co-Authored-By: Claude <noreply@anthropic.com>
@@ -21,11 +21,13 @@ identities
 dash rewrites
      2  lines
 
-pass --verbose to list the commits behind these counts
+main: 3 of 5 commits will change hash, starting at 181a4d0e0061 2026-08-11 feat(parser): accept empty payloads
 
-refs/heads/main: 4 of 5 commits will change hash, starting at e241d699c072 2026-08-11 feat(parser): accept empty payloads
+=== summary
+1 repository: 1 found
 
 nothing was rewritten. Run apply to rewrite the history
+pass --verbose to list the commits behind these counts
 ```
 
 ## Features
@@ -38,6 +40,7 @@ nothing was rewritten. Run apply to rewrite the history
 - [Several repositories](#sweeping-several-repositories) in one run, with [`--quiet`](#quiet-runs) for a scheduled sweep
 - [`--exit-code`](#exit-status) for CI and pre-push hooks, and a [GitHub Action](#github-action)
 - [Backups](#backups) of the pre-rewrite refs, `restore` to put one run back, and `clean` to take them away
+- A [summary](#the-summary) closes every run with the counts and the one thing to do about them
 
 ## Installation
 
@@ -164,7 +167,7 @@ agent instruction files, counted by the refs in scope that carry them
 
 The paths checked are `.aider.conf.yml`, `.clinerules`, `.cursor/rules`, `.cursorrules`, `.github/copilot-instructions.md`, `.junie/guidelines.md`, `.roorules`, `.windsurfrules`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `QWEN.md`. A directory is reported as the directory, and each path is looked up at a ref rather than searched for.
 
-Nothing here is rewritten. The report prints `git rm -r --cached <path>` for each path found, which takes one out of the branch that carries it; every other ref keeps its copy, and so does the history.
+Nothing here is rewritten. The [summary](#the-summary) prints `git rm -r --cached <path>` for each path found, which takes one out of the branch that carries it; every other ref keeps its copy, and so does the history.
 
 ## Refs in scope
 
@@ -175,6 +178,7 @@ ai-attributions apply --exclude dev --exclude 'release/*' ~/src/example
 ai-attributions apply --base origin/main ~/src/example  # rewrite the commits this branch adds
 ```
 
+- A report names a ref the way it is known, `main` rather than `refs/heads/main`, and counts branches or tags past a handful of them rather than spelling every name out. Refs whose rewrite reaches the same commits share one line. `--verbose` names each one.
 - `--base ref` narrows those refs to the commits they add over `ref`, leaving the rest out of the walk, the counts and `--exit-code`. A commit the base already carries keeps its message, identity and hash.
 - A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. A tag `--exclude` matched is repointed locally and left out of the push.
 - Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`, and a repository whose refs in scope are clean says so only where the remote has nothing to report, so the branch is not left under a line that reads as the answer. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
@@ -196,7 +200,7 @@ Nothing is reported, and under `--exit-code` the status is 3 rather than 0. `bac
 
 ## Sweeping several repositories
 
-More than one `repo-path` prints a line per repository as it finishes, then the full report for each one with something to say. A repository that fails does not end the sweep, and its failure goes to stderr.
+More than one `repo-path` prints a line per repository as it finishes, then the full report for each one with something to say, then the [summary](#the-summary). A repository that fails does not end the sweep, and its failure goes to stderr.
 
 ```console
 $ ai-attributions ~/src/github.com/andornaut/*
@@ -206,11 +210,18 @@ out of scope /home/andornaut/src/github.com/andornaut/mrs
 skipped      /home/andornaut/src/github.com/andornaut/qmk_firmware
 
 === /home/andornaut/src/github.com/andornaut/cloudflare-starter
-2 of 5 commits carry AI attributions, across refs/heads/main
+2 of 5 commits carry AI attributions, across main
 
 === /home/andornaut/src/github.com/andornaut/mrs
 remote branches carrying AI attributions, outside the refs in scope and counted in no status
      3 of 3 commits  refs/remotes/origin/agent-work
+
+=== summary
+4 repositories: 1 found, 1 out of scope, 1 skipped, 1 clean
+2 of 41 commits carry AI attributions
+
+nothing was rewritten. Run apply to rewrite the history
+pass --verbose to list the commits behind these counts
 ```
 
 Each word names a different thing to go and do.
@@ -225,6 +236,21 @@ Word | Meaning | Status
 `failed` | the run could not finish, and the error is on stderr | 2
 
 Every status but 2 needs `--exit-code`, and the sweep exits on the worst it saw, whatever order the paths came in. `backups`, `clean` and `restore` have no finding to summarize, so they print under the `=== <path>` heading only.
+
+## The summary
+
+Every `scan` and `apply` closes with one, a run pointed at a single repository included, so what to do about a finding is said once for the run rather than under every repository carrying one.
+
+```text
+=== summary
+30 repositories: 1 failed, 4 found, 25 clean
+9 of 7412 commits carry AI attributions or dashes
+
+nothing was rewritten. Run apply to rewrite the history
+pass --verbose to list the commits behind these counts
+```
+
+The counts cover every repository the run walked, `--quiet` deciding what was printed rather than what was counted. The commit line is left out for a single repository, whose report opens on the same count. `--agents-files` adds what to do with an instruction file here. `backups`, `clean` and `restore` print no summary, and neither does a `--quiet` run that wrote nothing.
 
 ## Quiet runs
 

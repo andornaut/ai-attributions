@@ -170,6 +170,40 @@ func TestReportNamesEmdashesOnlyWhenAskedFor(t *testing.T) {
 	}
 }
 
+// Refs whose rewrite reaches the same commits share a line. A repository whose
+// releases all sit on the branch tip would otherwise print the same sentence
+// once per tag, which is what buries the counts above it.
+func TestRadiusGroupsRefsThatMoveTogether(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("commit", "--quiet", "--allow-empty",
+		"--message=attributed\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+	for _, tag := range []string{"dev", "v1.0", "v1.1", "v1.2", "v1.3"} {
+		git("tag", tag)
+	}
+
+	refs, err := targetRefs(repo, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits, err := repo.Commits(refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := inspect(all, who, commits)
+
+	report := captureReport(t, func() {
+		if _, err := found.reportRadius(repo, Config{}, refs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if want := "main and 5 tags: 1 of 2 commits will change hash"; !strings.Contains(report, want) {
+		t.Errorf("the radius did not name the refs together, want %q:\n%s", want, report)
+	}
+	if got := strings.Count(report, "will change hash"); got != 1 {
+		t.Errorf("the radius printed %d lines for one rewrite:\n%s", got, report)
+	}
+}
+
 // A message that is not valid UTF-8 cannot be carried through JSON, so it is
 // counted and left alone. The identities beside it are still rewritten.
 func TestInvalidUTF8MessageIsSkipped(t *testing.T) {

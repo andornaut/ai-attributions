@@ -187,9 +187,35 @@ func reportRewritten(targets []target) {
 func reportUnleased(targets []target) {
 	unleased := unleasedRefs(targets)
 	if len(unleased) > 0 {
+		// Named the way they are known: the push command below spells every
+		// one out in full, so a sentence of forty qualified refs says nothing
+		// the reader cannot already copy from there.
 		sayf("\nno value on the remote to hold %s to, so these are forced\n",
-			strings.Join(unleased, ", "))
+			joinAnd(refScope(unleased, false)))
 	}
+}
+
+// shortRef is the name a ref is known by, which is what a report names it as:
+// forty refs spelled refs/tags/ are read for the names after the prefix.
+func shortRef(ref string) string {
+	for _, prefix := range []string{"refs/heads/", "refs/tags/"} {
+		if short, ok := strings.CutPrefix(ref, prefix); ok {
+			return short
+		}
+	}
+	return ref
+}
+
+// joinAnd spells a list the way it is read, so the last item does not look
+// like one more comma.
+func joinAnd(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return "no refs"
+	case 1:
+		return parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 }
 
 // plural spells the noun for a count, so a report does not say "1 runs".

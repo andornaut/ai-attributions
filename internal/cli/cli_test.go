@@ -159,15 +159,57 @@ func TestCommitsInScope(t *testing.T) {
 }
 
 // The scope a report names is the history it answers for, base included, so a
-// count cannot be read as covering more than was walked.
+// count cannot be read as covering more than was walked. Refs are named the way
+// they are known, and a crowd of them is counted: a repository with twenty
+// releases would otherwise spend the line on their names.
 func TestScopeLabel(t *testing.T) {
-	refs := []string{"refs/heads/agent-work"}
-	if got := scopeLabel(Config{}, refs); got != "refs/heads/agent-work" {
-		t.Errorf("scopeLabel() = %q", got)
+	tags := []string{
+		"refs/heads/main",
+		"refs/tags/dev", "refs/tags/v1.0", "refs/tags/v1.1", "refs/tags/v1.2", "refs/tags/v1.3",
 	}
-	want := "refs/heads/agent-work since origin/main"
-	if got := scopeLabel(Config{Base: "origin/main"}, refs); got != want {
-		t.Errorf("scopeLabel() = %q, want %q", got, want)
+
+	tests := []struct {
+		name    string
+		cfg     Config
+		refs    []string
+		verbose bool
+		want    string
+	}{
+		{
+			name: "one branch",
+			refs: []string{"refs/heads/agent-work"},
+			want: "agent-work",
+		},
+		{
+			name: "a base the count was measured against",
+			cfg:  Config{Base: "origin/main"},
+			refs: []string{"refs/heads/agent-work"},
+			want: "agent-work since origin/main",
+		},
+		{
+			name: "a handful of tags, named",
+			refs: []string{"refs/heads/main", "refs/tags/v1.0", "refs/tags/v1.1"},
+			want: "main, v1.0 and v1.1",
+		},
+		{
+			name: "a crowd of tags, counted",
+			refs: tags,
+			want: "main and 5 tags",
+		},
+		{
+			name:    "--verbose names every one",
+			refs:    tags,
+			verbose: true,
+			want:    "main, dev, v1.0, v1.1, v1.2 and v1.3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := scopeLabel(tt.cfg, tt.refs, tt.verbose); got != tt.want {
+				t.Errorf("scopeLabel() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -166,10 +166,11 @@ func (f findings) report(verbose, elsewhere bool, scope string) {
 		sayf("\ndash rewrites\n%6d  lines\n", f.emdashes)
 	}
 	f.reportSkipped()
-	if !verbose {
-		sayf("\npass --verbose to list the commits behind these counts\n")
-	}
 }
+
+// held reports whether the counts left the commits behind them unsaid, which
+// the summary answers for once rather than every report closing on it.
+func (f findings) held(verbose bool) bool { return f.flagged > 0 && !verbose }
 
 func (f findings) reportTally(title string, tally map[string]int) {
 	if len(tally) == 0 {
@@ -238,16 +239,17 @@ func (a agentFiles) outcome() outcome {
 	return outcomeClean
 }
 
-// report names the instruction files, the refs carrying them, and how to take
-// one out.
+// report names the instruction files and the refs carrying them. What to do
+// about one is the summary's to say, once for the run: no rewrite this tool
+// makes takes a file out of a tree, so the advice is the same in every
+// repository carrying one.
 func (a agentFiles) report(verbose bool) {
 	if len(a) == 0 {
 		return
 	}
-	paths := slices.Sorted(maps.Keys(a))
 
 	sayf("\nagent instruction files, counted by the refs in scope that carry them\n")
-	for _, path := range paths {
+	for _, path := range a.paths() {
 		sayf("%6d  %s\n", len(a[path]), path)
 		if verbose {
 			for _, ref := range a[path] {
@@ -256,24 +258,23 @@ func (a agentFiles) report(verbose bool) {
 		}
 	}
 
-	// Said here because the report above this one answers for commits, and a
-	// run whose commits were clean would otherwise open on a clean line and
-	// close on a status nothing in the report accounted for.
-	sayf("\na file here is a finding of its own: --exit-code exits 1 whatever the\n")
-	sayf("commit walk above reported\n")
+}
 
-	sayf("\nthese configure a contributor's agent rather than the project, so they\n")
-	sayf("belong in a global ignore file. Take one out of the branch that carries it:\n")
-	for _, path := range paths {
-		sayf("  git rm -r --cached %s\n", path)
-	}
-	// Said plainly, because the counts above name tags as readily as branches
-	// and the command above cannot do anything about a tag.
-	sayf("\nevery other ref keeps its copy, and so does the history: this tool\n")
-	sayf("rewrites messages and identities, never trees\n")
-	if !verbose {
-		sayf("\npass --verbose to list the refs behind these counts\n")
-	}
+// held reports whether the counts left the refs behind them unsaid.
+func (a agentFiles) held(verbose bool) bool { return len(a) > 0 && !verbose }
+
+// paths are the instruction files found, which the summary advises on.
+func (a agentFiles) paths() []string { return slices.Sorted(maps.Keys(a)) }
+
+// radius is one line of the rewrite's reach: how far it moves, and where it
+// starts. Refs sharing one are named together, since a repository whose tags
+// all sit on the branch tip would otherwise print the same sentence twenty
+// times over.
+type radius struct {
+	dirty    int
+	walked   int
+	earliest string
+	refs     []string
 }
 
 // reportRadius names how many commits the rewrite moves, and returns every
@@ -285,7 +286,8 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 	if len(f.changes) == 0 {
 		return moved, nil
 	}
-	sayf("\n")
+	var lines []*radius
+	seen := map[string]*radius{}
 	for _, ref := range refs {
 		// The same range the commits were read from. A change can only be in
 		// scope, so nothing below the base can be dirty, and walking to the
@@ -321,8 +323,23 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 		if earliest == "" {
 			continue
 		}
+		key := fmt.Sprintf("%s %d %d", earliest, len(dirty), len(graph))
+		if line, ok := seen[key]; ok {
+			line.refs = append(line.refs, ref)
+			continue
+		}
+		line := &radius{dirty: len(dirty), walked: len(graph), earliest: earliest, refs: []string{ref}}
+		seen[key] = line
+		lines = append(lines, line)
+	}
+
+	if len(lines) > 0 {
+		sayf("\n")
+	}
+	for _, line := range lines {
 		sayf("%s: %d of %d commits will change hash, starting at %s %s\n",
-			ref, len(dirty), len(graph), gitexec.Short(earliest), repo.Describe(earliest))
+			joinAnd(refScope(line.refs, cfg.Verbose)), line.dirty, line.walked,
+			gitexec.Short(line.earliest), repo.Describe(line.earliest))
 	}
 	return moved, nil
 }

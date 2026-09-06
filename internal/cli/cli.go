@@ -21,18 +21,21 @@ func Execute(op Op, cfg Config, stamp string, paths []string) (int, error) {
 	if len(paths) == 0 {
 		paths = []string{"."}
 	}
+	run := newSummary(op, cfg)
 	if len(paths) > 1 {
-		return sweep(op, cfg, stamp, paths), nil
+		status := sweep(run, op, cfg, stamp, paths)
+		run.report()
+		return status, nil
 	}
 
-	if cfg.Quiet {
-		return quietRepo(op, cfg, stamp, paths[0])
-	}
-	found, err := runRepo(op, cfg, stamp, paths[0])
+	status, err := single(run, op, cfg, stamp, paths[0])
 	if err != nil {
+		// The failure is the report, and the caller prints it. A summary
+		// saying one repository failed would only be in the way of it.
 		return 0, err
 	}
-	return found.status(cfg), nil
+	run.report()
+	return status, nil
 }
 
 // Version is the release this binary was built from, or "dev" for one built
@@ -63,17 +66,28 @@ func worthSaying(cfg Config, ended outcome, err error) bool {
 	return false
 }
 
-// quietRepo runs one repository with the report held in a buffer, and writes it
-// out only when there is something to answer for. A failure prints what the run
-// got as far as: a run that could not look is not a run that found nothing.
-func quietRepo(op Op, cfg Config, stamp, repoPath string) (int, error) {
+// single runs one repository. Under --quiet the report is held in a buffer and
+// written out only when there is something to answer for. A failure prints what
+// the run got as far as: a run that could not look is not a run that found
+// nothing.
+func single(run *summary, op Op, cfg Config, stamp, repoPath string) (int, error) {
+	if !cfg.Quiet {
+		got, err := runRepo(op, cfg, stamp, repoPath)
+		if err != nil {
+			return 0, err
+		}
+		run.add(got, true)
+		return got.ended.status(cfg), nil
+	}
+
 	previous, saidBefore := out, said
 	buf := &bytes.Buffer{}
 	out = buf
-	found, err := runRepo(op, cfg, stamp, repoPath)
+	got, err := runRepo(op, cfg, stamp, repoPath)
 	out = previous
 
-	if worthSaying(cfg, found, err) {
+	speak := worthSaying(cfg, got.ended, err)
+	if speak {
 		_, _ = io.Copy(out, buf)
 	} else {
 		// Nothing reached the stream after all, so a failure printed later must
@@ -83,16 +97,17 @@ func quietRepo(op Op, cfg Config, stamp, repoPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return found.status(cfg), nil
+	run.add(got, speak)
+	return got.ended.status(cfg), nil
 }
 
 // runRepo does one repository's work and reports how it ended, leaving the exit
 // status to the caller, which is the only part that differs between a single
 // run and a sweep.
-func runRepo(op Op, cfg Config, stamp, repoPath string) (outcome, error) {
+func runRepo(op Op, cfg Config, stamp, repoPath string) (result, error) {
 	repo, err := gitexec.Open(repoPath)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	cfg.Remote = targetRemote(repo)
 
@@ -100,25 +115,25 @@ func runRepo(op Op, cfg Config, stamp, repoPath string) (outcome, error) {
 	// they stay available whatever the repository is.
 	switch op {
 	case OpBackups:
-		return outcomeClean, listBackups(repo)
+		return result{}, listBackups(repo)
 	case OpClean:
-		return outcomeClean, cleanBackups(repo, cfg, stamp)
+		return result{}, cleanBackups(repo, cfg, stamp)
 	case OpRestore:
-		return outcomeClean, restoreBackup(repo, stamp)
+		return result{}, restoreBackup(repo, stamp)
 	case OpScan, OpApply:
 		// Handled below, once the fork check has had its say.
 	}
 
 	upstream, isFork, err := forkUpstream(repo, cfg.Remote)
 	if err != nil {
-		return outcomeClean, err
+		return result{}, err
 	}
 	if isFork {
 		reportFork(repo, upstream)
 		if op.rewrites() {
 			reportDonef("nothing examined, a fork is not this repository's to rewrite")
 		}
-		return outcomeSkipped, nil
+		return result{ended: outcomeSkipped}, nil
 	}
 	return scan(repo, op, cfg)
 }
@@ -127,8 +142,11 @@ func runRepo(op Op, cfg Config, stamp, repoPath string) (outcome, error) {
 // the full report for each one that found something. A repository that fails
 // does not end the sweep: the rest are still worth looking at, and a failure
 // nobody sees is the reason to keep going rather than stop.
-func sweep(op Op, cfg Config, stamp string, paths []string) int {
-	type result struct {
+func sweep(run *summary, op Op, cfg Config, stamp string, paths []string) int {
+	// pending is a repository's full report, held back until every line has
+	// been printed. Named apart from result, which is what a repository's run
+	// returns.
+	type pending struct {
 		path   string
 		report string
 	}
@@ -136,7 +154,7 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 	previous := out
 	defer func() { out = previous }()
 
-	var reports []result
+	var reports []pending
 	var failed, found, skipped bool
 	for _, repoPath := range paths {
 		// backups, clean and restore report rather than scan. There is no
@@ -147,6 +165,7 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 			sayf("=== %s\n", repoPath)
 			if _, err := runRepo(op, cfg, stamp, repoPath); err != nil {
 				failed = true
+				run.addFailure()
 				reportFailuref("%s: %v", repoPath, err)
 			}
 			continue
@@ -156,20 +175,22 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 		// screen, which is what makes a sweep of many readable at all.
 		buf := &bytes.Buffer{}
 		out = buf
-		ended, err := runRepo(op, cfg, stamp, repoPath)
+		got, err := runRepo(op, cfg, stamp, repoPath)
 		out = previous
+		ended := got.ended
 
 		// The line goes out as each repository finishes, rather than at the
 		// end, so that a long sweep says where it has got to. The failure
 		// itself goes to stderr, where a single run puts it.
 		if err != nil {
 			failed = true
+			run.addFailure()
 			sayf("%s %s\n", column(colorOut, red, "failed"), repoPath)
 			reportFailuref("%s: %v", repoPath, err)
 			// Whatever the run reported before it failed is still worth having:
 			// an apply that failed at the push has already named the backup it
 			// saved and the refs it moved.
-			reports = append(reports, result{path: repoPath, report: buf.String()})
+			reports = append(reports, pending{path: repoPath, report: buf.String()})
 			continue
 		}
 		// --quiet keeps the line and the report for a repository worth
@@ -178,6 +199,7 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 		// answer for, being the same fork every day, until --exit-code makes it
 		// a status the caller reads.
 		speak := !cfg.Quiet || worthSaying(cfg, ended, nil)
+		run.add(got, speak)
 		if speak {
 			sayf("%s %s\n", column(colorOut, ended.color(), ended.String()), repoPath)
 		}
@@ -193,7 +215,7 @@ func sweep(op Op, cfg Config, stamp string, paths []string) int {
 			// status.
 		}
 		if ended != outcomeClean && speak {
-			reports = append(reports, result{path: repoPath, report: buf.String()})
+			reports = append(reports, pending{path: repoPath, report: buf.String()})
 		}
 	}
 

@@ -7,6 +7,12 @@ import (
 	"github.com/andornaut/ai-attributions/internal/gitexec"
 )
 
+// runQuiet is one repository's run with a summary of its own, which these
+// tests do not read.
+func runQuiet(op Op, cfg Config, repoPath string) (int, error) {
+	return single(newSummary(op, cfg), op, cfg, "", repoPath)
+}
+
 func TestQuietPrintsOnlyWhatThereIsToAnswerFor(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -37,7 +43,7 @@ func TestQuietPrintsOnlyWhatThereIsToAnswerFor(t *testing.T) {
 			var status int
 			report := captureReport(t, func() {
 				var err error
-				if status, err = quietRepo(OpScan, cfg, "", repo.Dir()); err != nil {
+				if status, err = runQuiet(OpScan, cfg, repo.Dir()); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -66,13 +72,13 @@ func TestQuietDoesNotChangeTheStatus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want = found.status(loud)
+		want = found.ended.status(loud)
 	})
 
 	var got int
 	captureReport(t, func() {
 		var err error
-		if got, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if got, err = runQuiet(OpScan, Config{Quiet: true, ExitCode: true}, repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -104,7 +110,7 @@ func TestQuietKeepsARemoteOnlyFinding(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = runQuiet(OpScan, Config{Quiet: true, ExitCode: true}, repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -165,7 +171,7 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 	var status int
 	report := captureReport(t, func() {
 		var err error
-		if status, err = quietRepo(OpScan, Config{Quiet: true, ExitCode: true}, "", repo.Dir()); err != nil {
+		if status, err = runQuiet(OpScan, Config{Quiet: true, ExitCode: true}, repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -178,7 +184,7 @@ func TestQuietExplainsANonZeroStatus(t *testing.T) {
 
 	repo = setup(t)
 	silent := captureReport(t, func() {
-		if _, err := quietRepo(OpScan, Config{Quiet: true}, "", repo.Dir()); err != nil {
+		if _, err := runQuiet(OpScan, Config{Quiet: true}, repo.Dir()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -197,7 +203,8 @@ func TestSweepNamesAFindingOutOfScope(t *testing.T) {
 
 	var status int
 	report := captureReport(t, func() {
-		status = sweep(OpScan, Config{Quiet: true}, "", []string{tidy.Dir(), elsewhere.Dir()})
+		cfg := Config{Quiet: true}
+		status = sweep(newSummary(OpScan, cfg), OpScan, cfg, "", []string{tidy.Dir(), elsewhere.Dir()})
 	})
 
 	if !strings.Contains(report, "out of scope "+elsewhere.Dir()) {
