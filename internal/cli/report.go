@@ -76,12 +76,15 @@ func reportFailuref(format string, args ...any) {
 //	found         attributions on the refs in scope, so apply rewrites them
 //	rewrote       an apply moved a ref, so this repository's history has changed
 //	out of scope  a finding on a ref the run did not answer for
+//	not fetched   the remote could not be reached, so it answers as of last time
 //	skipped       a fork, which is nobody's to rewrite here
 //
 // A repository the run declined to examine is deliberately not clean: reporting
 // "I did not look" as "nothing to find" is the one answer a sweep must not
 // give. Neither is one whose only finding sits on a ref that was out of scope,
-// which no status can carry and the line has to name.
+// which no status can carry and the line has to name, nor one whose remote went
+// unread: a fetch that failed found nothing, and saying so is not the same as
+// finding nothing.
 type outcome int
 
 const (
@@ -89,13 +92,18 @@ const (
 	outcomeFound
 	outcomeRewrote
 	outcomeOutOfScope
+	outcomeNotFetched
 	outcomeSkipped
 )
 
 // outcomes is every word a sweep can print in its first column, which is what
-// the column is sized from.
+// the column is sized from. Worst first, which is the order the summary tallies
+// them in.
 func outcomes() []outcome {
-	return []outcome{outcomeClean, outcomeFound, outcomeRewrote, outcomeOutOfScope, outcomeSkipped}
+	return []outcome{
+		outcomeRewrote, outcomeFound, outcomeOutOfScope,
+		outcomeNotFetched, outcomeSkipped, outcomeClean,
+	}
 }
 
 func (o outcome) String() string {
@@ -106,6 +114,8 @@ func (o outcome) String() string {
 		return "rewrote"
 	case outcomeOutOfScope:
 		return "out of scope"
+	case outcomeNotFetched:
+		return "not fetched"
 	case outcomeSkipped:
 		return "skipped"
 	default:
@@ -122,6 +132,8 @@ func (o outcome) color() string {
 		return cyan
 	case outcomeOutOfScope:
 		return magenta
+	case outcomeNotFetched:
+		return gray
 	case outcomeSkipped:
 		return blue
 	default:
@@ -142,27 +154,38 @@ func (o outcome) status(cfg Config) int {
 	case outcomeSkipped:
 		return 3
 	default:
-		// outcomeOutOfScope is here with outcomeClean: a ref the run did not
-		// answer for cannot move the status, which reports on the refs in
-		// scope, the same set apply rewrites. It is named in the report and in
-		// the sweep's line instead.
+		// outcomeOutOfScope and outcomeNotFetched are here with outcomeClean:
+		// neither a ref the run did not answer for nor a remote it could not
+		// read can move the status, which reports on the refs in scope, the
+		// same set apply rewrites. Both are named in the report and in the
+		// sweep's line instead.
 		return 0
 	}
 }
 
 // reportCarried names the tags that move without being in scope, which the refs
-// the run was pointed at do not say by themselves.
-func reportCarried(carried []target) {
+// the run was pointed at do not say by themselves. Counted past a handful, as
+// every other listing is, and named one by one under --verbose.
+func reportCarried(verbose bool, carried []target) {
 	if len(carried) == 0 {
 		return
 	}
-	sayf("\ntags naming a commit that changes hash, repointed along with it\n")
+	var publish, excluded []string
 	for _, t := range carried {
 		if t.publish {
-			sayf("  %s\n", t.ref)
+			publish = append(publish, t.ref)
 			continue
 		}
-		sayf("  %s (excluded, so it is repointed here and not pushed)\n", t.ref)
+		excluded = append(excluded, t.ref)
+	}
+
+	sayf("\ntags naming a commit that changes hash, repointed along with it\n")
+	if len(publish) > 0 {
+		sayf("  %s\n", joinAnd(refScope(publish, verbose)))
+	}
+	if len(excluded) > 0 {
+		sayf("  %s (excluded, so %s repointed here and not pushed)\n",
+			joinAnd(refScope(excluded, verbose)), plural(len(excluded), "it is", "they are"))
 	}
 }
 
@@ -172,26 +195,43 @@ func reportFork(repo *gitexec.Repo, upstream gitexec.Remote) {
 	sayf("history that arrives from another project is not this repository's to rewrite\n")
 }
 
-func reportRewritten(targets []target) {
-	sayf("\n")
+// reportRewritten says where the refs that moved ended up. Refs that made the
+// same move share a line: a repository whose tags all sit on the branch tip
+// would otherwise print one hash pair per tag, all of them the same pair.
+func reportRewritten(verbose bool, targets []target) {
+	type move struct {
+		hash, after string
+	}
+	var order []move
+	refs := map[move][]string{}
 	for _, t := range targets {
 		if !t.moved() {
 			continue
 		}
-		sayf("%s %s -> %s\n", t.ref, gitexec.Short(t.hash), gitexec.Short(t.after))
+		made := move{hash: t.hash, after: t.after}
+		if refs[made] == nil {
+			order = append(order, made)
+		}
+		refs[made] = append(refs[made], t.ref)
+	}
+
+	sayf("\n")
+	for _, made := range order {
+		sayf("%s  %s -> %s\n", joinAnd(refScope(refs[made], verbose)),
+			gitexec.Short(made.hash), gitexec.Short(made.after))
 	}
 }
 
 // reportUnleased names the refs that will be pushed without a lease, so the
 // weaker guarantee is visible rather than implied.
-func reportUnleased(targets []target) {
+func reportUnleased(verbose bool, targets []target) {
 	unleased := unleasedRefs(targets)
 	if len(unleased) > 0 {
 		// Named the way they are known: the push command below spells every
 		// one out in full, so a sentence of forty qualified refs says nothing
 		// the reader cannot already copy from there.
 		sayf("\nno value on the remote to hold %s to, so these are forced\n",
-			joinAnd(refScope(unleased, false)))
+			joinAnd(refScope(unleased, verbose)))
 	}
 }
 

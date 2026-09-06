@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -218,5 +219,42 @@ func TestSweepNamesAFindingOutOfScope(t *testing.T) {
 	}
 	if status != 0 {
 		t.Errorf("a finding on a ref out of scope exited %d, want 0", status)
+	}
+}
+
+// A repository whose refs in scope are clean and whose remote could not be
+// reached ends on a word of its own. Reporting it as clean would pass "I did
+// not look" off as "nothing to find", and reporting it as a finding out of
+// scope would name one the run never saw.
+func TestAnUnreachableRemoteIsNotAFinding(t *testing.T) {
+	repo, git := gitRepo(t)
+	git("remote", "add", "origin", "https://github.com/example/thing.git")
+	previous := fetchRemote
+	fetchRemote = func(*gitexec.Repo, string) error { return errors.New("host is unreachable") }
+	t.Cleanup(func() { fetchRemote = previous })
+
+	var status int
+	report := captureReport(t, func() {
+		var err error
+		if status, err = runQuiet(OpScan, Config{Quiet: true, ExitCode: true}, repo.Dir()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(report, "could not fetch origin") {
+		t.Errorf("--quiet dropped the remote it could not read:\n%s", report)
+	}
+	// Nothing was found, so nothing moves the status: the word and the report
+	// are where a run that could not look says so.
+	if status != 0 {
+		t.Errorf("an unreachable remote exited %d, want 0", status)
+	}
+
+	got, err := runRepo(OpScan, Config{}, "", repo.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ended != outcomeNotFetched {
+		t.Errorf("outcome is %v, want %v", got.ended, outcomeNotFetched)
 	}
 }

@@ -38,9 +38,12 @@ func listBackups(repo *gitexec.Repo) error {
 		sayf("no backups saved\n")
 		return nil
 	}
+	// The timestamp heads the run rather than repeating on every ref: a run
+	// is what restore is given and what a backup is reached for.
 	for _, run := range runs {
+		sayf("%s\n", run.stamp)
 		for _, ref := range run.sorted() {
-			sayf("%s  %s  %s\n", run.stamp, ref, gitexec.Short(run.refs[ref]))
+			sayf("  %s  %s\n", shortRef(ref), gitexec.Short(run.refs[ref]))
 		}
 	}
 	sayf("\nput one run back with: ai-attributions restore <timestamp>\n")
@@ -71,7 +74,7 @@ func restoreBackup(repo *gitexec.Repo, stamp string) error {
 		return err
 	}
 	for _, ref := range run.sorted() {
-		sayf("%s -> %s\n", ref, gitexec.Short(run.refs[ref]))
+		sayf("%s -> %s\n", shortRef(ref), gitexec.Short(run.refs[ref]))
 	}
 	sayf("\nrestored. A published rewrite still needs a force push to undo on the remote\n")
 	return nil
@@ -107,7 +110,11 @@ func cleanBackups(repo *gitexec.Repo, cfg Config, stamp string) error {
 			len(runs), plural(len(runs), "run", "runs"), keep)
 		return nil
 	}
-	sayf("\nremoved %d of %d saved %s\n", removed, len(runs), plural(len(runs), "run", "runs"))
+	// Only where the lines above do not already say it: removing one run
+	// prints one line, and a tally of it would be the same fact twice.
+	if removed > 1 {
+		sayf("\nremoved %d of %d saved %s\n", removed, len(runs), plural(len(runs), "run", "runs"))
+	}
 	return nil
 }
 
@@ -139,7 +146,7 @@ func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
 	// spend a slot of the bound below on a run that could not be told from it.
 	if len(runs) > 0 && maps.Equal(runs[len(runs)-1].refs, saving) {
 		reused := runs[len(runs)-1]
-		sayf("the refs stand where %s%s/ saved them, so no second copy is written\n",
+		sayBlockf("the refs stand where %s%s/ saved them, so no second copy is written\n",
 			backupPrefix, reused.stamp)
 		// The reused snapshot is this run's, so the bound is over what is left
 		// once it is set aside, as it is below. Counting it would leave a run
@@ -163,7 +170,7 @@ func saveBackup(repo *gitexec.Repo, saving map[string]string) (backup, error) {
 	if err := repo.UpdateRefs(writing); err != nil {
 		return backup{}, err
 	}
-	sayf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
+	sayBlockf("saved the pre-rewrite refs under %s%s/\n", backupPrefix, stamp)
 	// The bound is over the runs that came before, and this run's own snapshot
 	// sits above it until the next rewrite prunes to it again. Counting this
 	// one against the bound would cost an earlier run for a snapshot that a

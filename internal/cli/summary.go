@@ -108,19 +108,21 @@ func (s *summary) report() {
 	// against the refs it answers for, so the summary would repeat it a blank
 	// line later.
 	if count > 1 {
-		sayf("%d of %d commits carry %s\n", s.flagged, s.walked, subject(s.cfg.Emdashes))
+		sayf("%d of %d %s %s %s\n", s.flagged, s.walked,
+			plural(s.walked, "commit", "commits"), plural(s.flagged, "carries", "carry"),
+			subject(s.cfg.Emdashes))
 	}
 	s.advise()
 }
 
-// outcomes spells the tally, worst first and leaving out what did not happen,
-// so the interesting count is the one the line opens on.
+// outcomes spells the tally in the order outcomes() gives, worst first, and
+// leaves out what did not happen, so the interesting count opens the line.
 func (s *summary) outcomes() string {
 	var parts []string
 	if s.failed > 0 {
 		parts = append(parts, fmt.Sprintf("%d failed", s.failed))
 	}
-	for _, o := range []outcome{outcomeRewrote, outcomeFound, outcomeOutOfScope, outcomeSkipped, outcomeClean} {
+	for _, o := range outcomes() {
 		if n := s.repos[o]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, o))
 		}

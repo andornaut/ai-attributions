@@ -126,7 +126,11 @@ var version = &cobra.Command{
 
 // Cmd implements the root ai-attributions command.
 var Cmd = &cobra.Command{
-	Use:   "ai-attributions",
+	// The usage line names the default form as well as the commands: scan runs
+	// where no command is given, so `ai-attributions ~/src/example` is how the
+	// tool is most often reached, and a usage line listing only [command] would
+	// not say so.
+	Use:   "ai-attributions [repo-path...]",
 	Short: "AI attributions in commits are ads, remove them!",
 	Long: "AI attributions in commits are ads, remove them!\n\n" +
 		"Reports the AI attributions in a repository's history, and, where the\n" +
@@ -135,7 +139,9 @@ var Cmd = &cobra.Command{
 		"for it. repo-path defaults to the current directory; more than one path\n" +
 		"runs each in turn and summarizes them.\n\n" +
 		"A command is optional: with none, scan runs, so `ai-attributions .` and\n" +
-		"`ai-attributions scan .` are the same run.\n\n" +
+		"`ai-attributions scan .` are the same run. The flags that describe a walk\n" +
+		"of the history belong to scan and apply rather than to this command; run\n" +
+		"`ai-attributions scan --help` to list them.\n\n" +
 		"Exit status:\n" +
 		"  0  nothing found\n" +
 		"  1  attributions, or the dashes and instruction files the flags for them\n" +
@@ -162,7 +168,7 @@ func init() {
 		c.Flags().BoolVar(&cfg.ExitCode, "exit-code", false, "exit 1 when anything is found, as git diff does")
 		c.Flags().StringVar(&cfg.Identity, "identity", "", "`identity` to put on agent-authored commits, or none to leave them alone (default: the repository's user.name and user.email)")
 		c.Flags().BoolVar(&cfg.Quiet, "quiet", false, "print nothing unless a repository found something, for a scheduled run")
-		c.Flags().BoolVar(&cfg.Verbose, "verbose", false, "report every commit rather than a summary")
+		c.Flags().BoolVar(&cfg.Verbose, "verbose", false, "list every commit, ref and file behind the counts, rather than the counts alone")
 	}
 	// --push rewrites the remote, so it belongs to apply alone.
 	apply.Flags().BoolVar(&cfg.Push, "push", false, "force push the rewritten refs")

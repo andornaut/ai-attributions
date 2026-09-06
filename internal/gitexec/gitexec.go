@@ -90,6 +90,23 @@ func (r *Repo) output(args ...string) (string, int, error) {
 	return stdout.String(), 0, nil
 }
 
+// Message is what git said, without the command output() names in front of it.
+// For a report whose own sentence already says which command was run, the
+// prefix is the part the reader has read twice.
+func Message(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	if !strings.HasPrefix(text, "git ") {
+		return text
+	}
+	if _, said, ok := strings.Cut(text, ": "); ok {
+		return said
+	}
+	return text
+}
+
 // outputWithInput runs git with stdin attached, for a command that reads what
 // to work on rather than taking it as arguments.
 func (r *Repo) outputWithInput(stdin io.Reader, args ...string) (string, error) {

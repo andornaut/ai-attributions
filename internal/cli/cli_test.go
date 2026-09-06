@@ -476,3 +476,29 @@ func TestTargetRefsScope(t *testing.T) {
 		t.Errorf("targetRefs(--current-branch) = %v, want the checked out branch alone", refs)
 	}
 }
+
+// One line for the refs a run will not look at, however many there are: forty
+// lines naming what was skipped would come before the counts that say what was
+// found.
+func TestExcludedRefsAreNamedInOneLine(t *testing.T) {
+	repo, git := gitRepo(t)
+	for _, tag := range []string{"v1.0", "v1.1", "v1.2", "v1.3", "v1.4"} {
+		git("tag", tag)
+	}
+
+	cfg := Config{Exclude: refPatterns{"v*"}}
+	var refs []string
+	report := capture(t, func() {
+		var err error
+		if refs, err = targetRefs(repo, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if want := "excluding 5 tags\n"; report != want {
+		t.Errorf("targetRefs reported %q, want %q", report, want)
+	}
+	if len(refs) != 1 {
+		t.Errorf("refs in scope are %v, want the branch alone", refs)
+	}
+}

@@ -137,7 +137,8 @@ func mapping(field, name, address string, who identity) string {
 func (f findings) report(verbose, elsewhere bool, scope string) {
 	if f.flagged == 0 {
 		if !elsewhere {
-			sayf("no %s in %d commits, across %s\n", subject(f.emdashesAsked), f.commits, scope)
+			sayf("no %s in %d %s, across %s\n",
+				subject(f.emdashesAsked), f.commits, plural(f.commits, "commit", "commits"), scope)
 		}
 		f.reportSkipped()
 		return
@@ -159,11 +160,13 @@ func (f findings) report(verbose, elsewhere bool, scope string) {
 		sayf("\n")
 	}
 
-	sayf("%d of %d commits carry %s, across %s\n", f.flagged, f.commits, subject(f.emdashesAsked), scope)
+	sayf("%d of %d %s %s %s, across %s\n", f.flagged, f.commits,
+		plural(f.commits, "commit", "commits"), plural(f.flagged, "carries", "carry"),
+		subject(f.emdashesAsked), scope)
 	f.reportTally("removed lines", f.removed)
 	f.reportTally("identities", f.identities)
 	if f.emdashes > 0 {
-		sayf("\ndash rewrites\n%6d  lines\n", f.emdashes)
+		sayf("\ndash rewrites\n%6d  %s\n", f.emdashes, plural(f.emdashes, "line", "lines"))
 	}
 	f.reportSkipped()
 }
@@ -337,8 +340,9 @@ func (f findings) reportRadius(repo *gitexec.Repo, cfg Config, refs []string) (m
 		sayf("\n")
 	}
 	for _, line := range lines {
-		sayf("%s: %d of %d commits will change hash, starting at %s %s\n",
+		sayf("%s: %d of %d %s will change hash, starting at %s %s\n",
 			joinAnd(refScope(line.refs, cfg.Verbose)), line.dirty, line.walked,
+			plural(line.walked, "commit", "commits"),
 			gitexec.Short(line.earliest), repo.Describe(line.earliest))
 	}
 	return moved, nil
@@ -427,8 +431,8 @@ func readRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who iden
 				found.stale = append(found.stale, ref)
 				continue
 			}
-			found.branches = append(found.branches, fmt.Sprintf("%6d of %d commits  %s",
-				got.flagged, len(commits), ref))
+			found.branches = append(found.branches, fmt.Sprintf("%6d of %d %s  %s",
+				got.flagged, len(commits), plural(len(commits), "commit", "commits"), ref))
 		}
 	}
 	return found, nil
@@ -438,8 +442,8 @@ func readRemoteOnly(repo *gitexec.Repo, cfg Config, opts clean.Options, who iden
 // None of it moves the status, so the report is the only place it is said.
 func (r remoteOnly) report() {
 	if r.fetchErr != nil {
-		sayBlockf("could not fetch %s, so the remote is reported as of the last fetch: %v\n",
-			r.remote, r.fetchErr)
+		sayBlockf("could not fetch %s, so the remote is reported as of the last fetch: %s\n",
+			r.remote, gitexec.Message(r.fetchErr))
 	}
 	if len(r.stale) > 0 {
 		sayBlockf("naming history this repository has already rewritten locally: %s\n",

@@ -259,9 +259,10 @@ func TestCleanBackups(t *testing.T) {
 	}
 }
 
-// The listing names each saved ref by the ref it was saved for, and abbreviates
-// the commit the way every other report does: backups and restore naming one
-// commit at two widths would read as two commits.
+// The listing heads each run with its timestamp and names the refs under it by
+// the names they are known by, abbreviating the commit the way every other
+// report does: backups and restore naming one commit at two widths would read
+// as two commits.
 func TestListBackupsNamesTheRefsARunSaved(t *testing.T) {
 	repo, git := gitRepo(t)
 	git("tag", "v1")
@@ -276,11 +277,17 @@ func TestListBackupsNamesTheRefsARunSaved(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, ref := range []string{"refs/heads/main", "refs/tags/v1"} {
-		want := fmt.Sprintf("%s  %s  %s\n", stamps[0], ref, gitexec.Short(hash))
+	if want := stamps[0] + "\n"; !strings.Contains(report, want) {
+		t.Errorf("backups reported\n%s\nwant a line %q", report, want)
+	}
+	for _, ref := range []string{"main", "v1"} {
+		want := fmt.Sprintf("  %s  %s\n", ref, gitexec.Short(hash))
 		if !strings.Contains(report, want) {
 			t.Errorf("backups reported\n%s\nwant a line %q", report, want)
 		}
+	}
+	if strings.Contains(report, "refs/heads/main") {
+		t.Errorf("the listing spelled a ref in full:\n%s", report)
 	}
 }
 

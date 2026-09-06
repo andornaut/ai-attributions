@@ -42,8 +42,8 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (result, error) {
 		if cfg.Base == "" {
 			sayf("no commits to inspect\n")
 		} else {
-			sayf("no commits to inspect: %s adds nothing over %s\n",
-				strings.Join(refs, ", "), cfg.Base)
+			sayf("no commits to inspect: %s %s nothing over %s\n",
+				joinAnd(refScope(refs, cfg.Verbose)), plural(len(refs), "adds", "add"), cfg.Base)
 		}
 		agents.report(cfg.Verbose)
 		reportNothingToRewrite(op)
@@ -77,7 +77,7 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (result, error) {
 	if err != nil {
 		return result{}, err
 	}
-	reportCarried(carried)
+	reportCarried(cfg.Verbose, carried)
 	elsewhere.report()
 
 	// What the run walked and what it held back, which the summary says once
@@ -93,11 +93,18 @@ func scan(repo *gitexec.Repo, op Op, cfg Config) (result, error) {
 	if found.flagged == 0 {
 		reportNothingToRewrite(op)
 		got.ended = agents.outcome()
-		// Nothing on the refs in scope, and a ref out of scope carrying
-		// something: the run ends on that rather than on clean, so a sweep's
-		// line names the repository and prints the report under it.
-		if got.ended == outcomeClean && elsewhere.any() {
-			got.ended = outcomeOutOfScope
+		// Nothing on the refs in scope, and something the run could not answer
+		// for: it ends on that rather than on clean, so a sweep's line names
+		// the repository and prints the report under it. A finding on a ref out
+		// of scope first, since a remote that carries one has been read; a
+		// fetch that failed found nothing and says only that it did not look.
+		if got.ended == outcomeClean {
+			switch {
+			case elsewhere.carries():
+				got.ended = outcomeOutOfScope
+			case elsewhere.fetchErr != nil:
+				got.ended = outcomeNotFetched
+			}
 		}
 		return got, nil
 	}
@@ -263,15 +270,21 @@ func targetRefs(repo *gitexec.Repo, cfg Config) ([]string, error) {
 		refs = found
 	}
 
-	var kept []string
+	var kept, dropped []string
 	for _, ref := range refs {
 		if excluded, err := cfg.Exclude.matches(ref); err != nil {
 			return nil, err
 		} else if excluded {
-			sayf("excluding %s\n", ref)
+			dropped = append(dropped, ref)
 			continue
 		}
 		kept = append(kept, ref)
+	}
+	// One line for the lot: --exclude 'v*' on a repository of releases would
+	// otherwise open the report with forty lines naming what it will not look
+	// at, before the counts that say what it did.
+	if len(dropped) > 0 {
+		sayf("excluding %s\n", joinAnd(refScope(dropped, cfg.Verbose)))
 	}
 	return kept, nil
 }

@@ -86,7 +86,7 @@ Flag | What it does
 `--exit-code` | exit 1 when anything is found, as `git diff` does
 `--identity identity` | identity for agent-authored commits, or `none` to leave them alone (default: the repository's `user.name` and `user.email`)
 `--quiet` | print nothing unless a repository found something
-`--verbose` | report every commit rather than a summary
+`--verbose` | list every commit, ref and file behind the counts, rather than the counts alone
 
 ```bash
 ai-attributions ~/src/example                            # report only
@@ -117,7 +117,7 @@ ai-attributions --exit-code --current-branch --base origin/main # only the commi
 > [!IMPORTANT]
 > Rewriting history changes every commit hash from the earliest rewritten commit onward. Anyone else working from those branches has to reset onto the new history. The count is printed before anything is rewritten.
 
-`apply` closes with a `done:` line, so a report ending without one stopped part way. A failure goes to stderr as `ai-attributions: error: <what went wrong>` and exits 2. Both markers are colored on a terminal (green finished, yellow found, blue not examined, red failed); a piped report, or one with `NO_COLOR` set, stays plain.
+`apply` closes with a `done:` line, so a report ending without one stopped part way. A failure goes to stderr as `ai-attributions: error: <what went wrong>` and exits 2. Both markers are colored on a terminal, as is each word a sweep prints in its first column; a piped report, or one with `NO_COLOR` set, stays plain.
 
 ## Trailers and footers
 
@@ -182,7 +182,7 @@ ai-attributions apply --base origin/main ~/src/example  # rewrite the commits th
 - `--base ref` narrows those refs to the commits they add over `ref`, leaving the rest out of the walk, the counts and `--exit-code`. A commit the base already carries keeps its message, identity and hash.
 - A tag naming a commit that changes hash is carried into the rewrite whatever the scope, so no tag is left naming history nothing else references. A tag `--exclude` matched is repointed locally and left out of the push.
 - Remote branches sit outside the set: any carrying attributions are named below the findings, counted in no status, and rewriting one means checking it out first. A sweep ends such a repository on `out of scope` rather than `clean`, and a repository whose refs in scope are clean says so only where the remote has nothing to report, so the branch is not left under a line that reads as the answer. One naming history an `apply` already rewrote is named separately, as a push that has not happened. `--base` leaves that report out.
-- The remote is fetched first, with `--prune --no-tags`: a branch deleted since the last fetch is not reported as one to go and clean, one pushed since is, and the refs in scope are left where they are. A remote that cannot be reached is reported, and the refs already here answer for it, an unreachable host being no reason to refuse a rewrite of local history.
+- The remote is fetched first, with `--prune --no-tags`: a branch deleted since the last fetch is not reported as one to go and clean, one pushed since is, and the refs in scope are left where they are. A remote that cannot be reached is reported, and the refs already here answer for it, an unreachable host being no reason to refuse a rewrite of local history. A repository clean but for that ends on `not fetched` rather than on `clean` or on `out of scope`: a fetch that failed found nothing, and saying so is not the same as finding nothing.
 
 ## Forks
 
@@ -232,6 +232,7 @@ Word | Meaning | Status
 `found` | attributions on the refs in scope, or an agent instruction file | 1
 `rewrote` | an `apply` gave a ref a new hash, so this repository's history has changed | 1
 `out of scope` | a finding on a ref the run did not answer for, a remote branch for instance | 0
+`not fetched` | the remote could not be reached, so it answers as of the last fetch | 0
 `skipped` | a fork, whose history is not this repository's to rewrite | 3
 `failed` | the run could not finish, and the error is on stderr | 2
 
@@ -260,7 +261,7 @@ The counts cover every repository the run walked, `--quiet` deciding what was pr
 0 4 * * * ai-attributions scan --quiet ~/src/github.com/andornaut/*
 ```
 
-A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so does `out of scope`: its finding moves no status, so weighing the report by one would drop it. `--quiet` decides what is written, not what is reported, and `backups`, `clean` and `restore` reject it.
+A fork counts as nothing to answer for. A failure always prints, as does a rewrite, and so do `out of scope` and `not fetched`: neither moves a status, so weighing the report by one would drop a finding on a remote branch, or leave a sweep whose network was down reading as an estate with nothing to find. `--quiet` decides what is written, not what is reported, and `backups`, `clean` and `restore` reject it.
 
 ## GitHub Action
 
@@ -308,14 +309,17 @@ Input | Default | What it is
 
 ```console
 $ ai-attributions backups
-20260811T054927Z  refs/heads/main  812479bfcbdf
-20260811T061340Z  refs/heads/main  4f0ac91d2b6e
+20260811T054927Z
+  main  812479bfcbdf
+20260811T061340Z
+  main  4f0ac91d2b6e
+  v1.4  4f0ac91d2b6e
 
 put one run back with: ai-attributions restore <timestamp>
 take them away with: ai-attributions clean, or clean --keep-last <n>
 
 $ ai-attributions restore 20260811T054927Z
-refs/heads/main -> 812479bfcbdf
+main -> 812479bfcbdf
 
 restored. A published rewrite still needs a force push to undo on the remote
 ```

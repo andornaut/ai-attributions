@@ -26,7 +26,7 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 		return false, err
 	}
 	resolveRewritten(repo, targets)
-	reportRewritten(targets)
+	reportRewritten(cfg.Verbose, targets)
 	moved := anyMoved(targets)
 	if err := dropBackupIfUnused(repo, moved, saved); err != nil {
 		return moved, err
@@ -37,6 +37,13 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 		reportDonef("no ref moved, so there is nothing to push")
 		return moved, nil
 	}
+	// A repository with no remote has nowhere to publish to, so it is told
+	// that rather than handed a push command naming a remote that does not
+	// exist. --push has already failed on this in checkRewritable.
+	if !repo.HasRemote(cfg.Remote) {
+		reportDonef("the history is rewritten here; there is no %s remote to push it to", cfg.Remote)
+		return moved, nil
+	}
 	// Read before reporting, so what is named as unleased is what the push
 	// really cannot hold the remote to. The values come off the remote itself,
 	// so they are read only where there is a push to hold to them.
@@ -45,7 +52,7 @@ func apply(repo *gitexec.Repo, cfg Config, refs []string, carried []target, chan
 			return moved, err
 		}
 	}
-	reportUnleased(publish)
+	reportUnleased(cfg.Verbose, publish)
 
 	if cfg.Push {
 		sayf("\npushing to %s\n", cfg.Remote)
