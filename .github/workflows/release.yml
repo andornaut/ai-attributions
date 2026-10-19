@@ -101,7 +101,7 @@ jobs:
           tar -czf ai-attributions_${{ matrix.goos }}_${{ matrix.asset_arch }}.tar.gz -C bin .
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ai-attributions_${{ matrix.goos }}_${{ matrix.asset_arch }}
           path: ai-attributions_${{ matrix.goos }}_${{ matrix.asset_arch }}.tar.gz
