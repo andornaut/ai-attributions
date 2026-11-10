@@ -359,7 +359,8 @@ The push covers the refs the rewrite moved and only those, so a ref whose commit
 The verification targets build the project-owned image in
 [`tests/container/Dockerfile`](./tests/container/Dockerfile). Checks use a frozen
 source snapshot and container scratch storage, without host credentials or a
-Docker socket. Only an explicit `make build` exports its binary to the checkout.
+Docker socket. Explicit `make build` exports its binary, and `make test` exports
+`coverage.txt` to the checkout.
 
 ```bash
 make check          # lint, race-enabled tests, coverage, and release-platform builds
@@ -377,7 +378,7 @@ make publish VERSION=x.y.z  # bump action.yml's version default, tag, push both
 
 `make exec COMMAND='go get example.org/module@version'` runs a dependency command
 in the same image with project files writable and Git metadata read-only. Full
-checks and focused tests do not export artifacts or modify the source checkout.
+checks do not export artifacts. Focused tests replace only `coverage.txt`.
 
 CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it. The release refuses a tag whose `action.yml` names a different version, which is what `make publish` keeps together.
 

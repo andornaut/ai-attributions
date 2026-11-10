@@ -49,8 +49,8 @@ case "$command" in
         if [ "$#" -eq 0 ]; then
             set -- ./...
         fi
-        CGO_ENABLED=1 go test -v -race -coverprofile=/scratch/coverage.txt -covermode=atomic "$@"
-        go tool cover -func=/scratch/coverage.txt
+        CGO_ENABLED=1 go test -v -race -coverprofile=coverage.txt -covermode=atomic "$@"
+        go tool cover -func=coverage.txt
         ;;
     build)
         mkdir -p bin
