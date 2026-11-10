@@ -356,15 +356,28 @@ The push covers the refs the rewrite moved and only those, so a ref whose commit
 - [andornaut@github /til/go](https://github.com/andornaut/til/blob/main/docs/go.md)
 - See [go.mod](./go.mod) for dependencies.
 
+The verification targets build the project-owned image in
+[`tests/container/Dockerfile`](./tests/container/Dockerfile). Checks use a frozen
+source snapshot and container scratch storage, without host credentials or a
+Docker socket. Only an explicit `make build` exports its binary to the checkout.
+
 ```bash
-make test           # go test ./...
-make coverage       # the suite under -race, then the per-function report
-make lint           # the golangci-lint run CI does, and make fmt applies
-make build          # a stripped static binary at bin/ai-attributions
+make check          # lint, race-enabled tests, coverage, and release-platform builds
+make check-info     # machine-readable declarations of the available checks
+make test           # suite and coverage report inside the container
+make test TEST_ARGS='-run TestName ./...'
+make coverage       # the same race-enabled suite and coverage report
+make lint           # dependency, Go, Markdown, and release-configuration checks
+make fmt            # apply Go formatting through the container
+make build          # export the stripped binary to bin/ai-attributions
 make install        # build, then copy it to /usr/local/bin with sudo
 make uninstall      # remove what install copied
 make publish VERSION=x.y.z  # bump action.yml's version default, tag, push both
 ```
+
+`make exec COMMAND='go get example.org/module@version'` runs a dependency command
+in the same image with project files writable and Git metadata read-only. Full
+checks and focused tests do not export artifacts or modify the source checkout.
 
 CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it. The release refuses a tag whose `action.yml` names a different version, which is what `make publish` keeps together.
 
