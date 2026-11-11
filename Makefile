@@ -8,35 +8,41 @@ LDFLAGS := -s -w
 # its own, so the shipped binary is static.
 export CGO_ENABLED := 0
 
-.DEFAULT_GOAL := check
-CHECK_TASKS := lint test build
-TEST_OUTPUTS := coverage.txt
-BUILD_OUTPUTS := bin/ai-attributions
-CONTAINER_BUILD_ARGS := GO_VERSION=$(shell awk '$$1 == "go" {print $$2; exit}' go.mod)
-CHECK_NETWORK_LINT := bridge
-
-override COMMAND := $(value COMMAND)
-override TEST_ARGS := $(value TEST_ARGS)
-
-export CHECK_TASKS BUILD_OUTPUTS TEST_OUTPUTS CONTAINER_BUILD_ARGS CHECK_NETWORK_LINT TEST_ARGS COMMAND
-
-export CHECK_TIMEOUT_SECONDS CHECK_MEMORY CHECK_SCRATCH_SIZE CHECK_WORK_SIZE CHECK_TMP_SIZE CHECK_NETWORK_LINT CONTAINER_IMAGE
-export CHECK_ADMISSION
-
-.PHONY: all check check-info lint test build exec coverage fmt install clean uninstall
+.PHONY: all build clean coverage fmt install lint publish test uninstall
 
 all: build
 
-check lint test build exec:
-	@./tests/container/run $@
+## build: a static binary, stripped
+build:
+	@mkdir -p $(BIN)
+	go build -ldflags="$(LDFLAGS)" -trimpath -o $(BIN)/$(CMD) .
 
-check-info:
-	@./tests/container/run info
+## test: the whole suite. Parts of it build real repositories, so git has to be
+## installed; nothing here needs git-filter-repo, which only apply drives.
+test:
+	go test ./...
 
-coverage: test
+## coverage: the suite with the race detector, then the per-function report.
+## CGO_ENABLED=1 for this recipe only: -race needs cgo, and the export above
+## turns it off for every other one because the shipped binary is static.
+coverage:
+	CGO_ENABLED=1 go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+	go tool cover -func=coverage.txt
 
+## fmt: apply the import grouping and gofmt rules CI checks
 fmt:
-	@./tests/container/run exec golangci-lint fmt
+	golangci-lint fmt
+
+## lint: golangci-lint, both of its commands. CI's Lint job also runs
+## markdownlint and `goreleaser check`, which need tooling this repository does
+## not otherwise ask for, so they are left to CI.
+##
+## `run` accepts an unknown key inside `linters.settings` and exits 0, which
+## leaves that setting disabled while CI stays green, so `config verify` is what
+## rejects a misspelled one.
+lint:
+	golangci-lint config verify
+	golangci-lint run
 
 ## publish: cut VERSION, both moves in one command. action.yml's version default
 ## names the release it was cut with, so the edit has to be in the commit the tag
@@ -76,3 +82,12 @@ uninstall:
 clean:
 	rm -rf $(BIN) dist
 	rm -f coverage.txt
+
+.DEFAULT_GOAL := check
+GO_IMAGE := golang:$(shell awk '$$1 == "go" {print $$2; exit}' go.mod)
+export GO_IMAGE
+export CHECK_TIMEOUT_SECONDS CHECK_MEMORY CHECK_SCRATCH_SIZE CHECK_WORK_SIZE CHECK_TMP_SIZE
+
+.PHONY: check
+check:
+	@./tests/container/check-stock

@@ -356,29 +356,26 @@ The push covers the refs the rewrite moved and only those, so a ref whose commit
 - [andornaut@github /til/go](https://github.com/andornaut/til/blob/main/docs/go.md)
 - See [go.mod](./go.mod) for dependencies.
 
-The verification targets build the project-owned image in
-[`tests/container/Dockerfile`](./tests/container/Dockerfile). Checks use a frozen
-source snapshot and container scratch storage, without host credentials or a
-Docker socket. Explicit `make build` exports its binary, and `make test` exports
-`coverage.txt` to the checkout.
+Native development commands such as `go test ./...`, `golangci-lint run`, and
+`go build ./...` run directly on the host. The existing Make helpers preserve
+those native workflows. `make check` is the isolated automation entry point.
+It uses stock Go, lint, release, Node and ShellCheck images to run
+lint, race-enabled tests, coverage reporting, and release-platform builds against
+a read-only source view with container scratch storage. It exports no artifacts.
 
 ```bash
-make check          # lint, race-enabled tests, coverage, and release-platform builds
-make check-info     # machine-readable declarations of the available checks
-make test           # suite and coverage report inside the container
-make test TEST_ARGS='-run TestName ./...'
-make coverage       # the same race-enabled suite and coverage report
-make lint           # dependency, Go, Markdown, and release-configuration checks
-make fmt            # apply Go formatting through the container
-make build          # export the stripped binary to bin/ai-attributions
-make install        # build, then copy it to /usr/local/bin with sudo
+make check          # complete verification in the project container
+make test           # native host suite
+make coverage       # native race-enabled suite and coverage report
+make lint           # native golangci-lint configuration and source checks
+make fmt            # native Go formatting
+make build          # native stripped binary at bin/ai-attributions
+make install        # native build, then copy to /usr/local/bin with sudo
 make uninstall      # remove what install copied
 make publish VERSION=x.y.z  # bump action.yml's version default, tag, push both
 ```
 
-`make exec COMMAND='go get example.org/module@version'` runs a dependency command
-in the same image with project files writable and Git metadata read-only. Full
-checks do not export artifacts. Focused tests replace only `coverage.txt`.
+Use `go test -run TestName ./...` for focused native tests. Linux CI runs the same native commands in stock containers and exports its coverage report.
 
 CI runs the tests, `golangci-lint`, and a cross-compile for each release platform. A push to `main` re-cuts the `dev` release; a `vX.Y.Z` tag publishes a release with [GoReleaser](https://goreleaser.com/) and re-points the major tag at it. The release refuses a tag whose `action.yml` names a different version, which is what `make publish` keeps together.
 

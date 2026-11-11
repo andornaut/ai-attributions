@@ -56,17 +56,23 @@ jobs:
         with:
           version: v29.9.3
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4.4.1
-        with:
-          version: v0.38.2
-          driver: docker
-
       - name: Build
-        run: make build
+        shell: bash
+        run: |
+          source tests/container/stock
+          stock_begin "$PWD"
+          STOCK_NETWORK=bridge stock_run "golang:$(awk '$1 == "go" {print $2; exit}' go.mod)" -- sh tests/container/go build
+          stock_finish
 
       - name: Test
-        run: make test
+        shell: bash
+        run: |
+          source tests/container/stock
+          stock_begin "$PWD"
+          output=$(mktemp -d)
+          STOCK_OUTPUT_DIR="$output" STOCK_NETWORK=bridge stock_run "golang:$(awk '$1 == "go" {print $2; exit}' go.mod)" -- sh tests/container/go test
+          stock_finish
+          cp "$output/coverage.txt" coverage.txt
 
       - name: Upload coverage
         uses: actions/upload-artifact@v7.0.2
@@ -108,11 +114,14 @@ jobs:
         with:
           version: v29.9.3
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4.4.1
-        with:
-          version: v0.38.2
-          driver: docker
-
       - name: Run lint gate
-        run: make lint
+        shell: bash
+        run: |
+          source tests/container/stock
+          stock_begin "$PWD"
+          STOCK_NETWORK=bridge stock_run "golang:$(awk '$1 == "go" {print $2; exit}' go.mod)" -- sh tests/container/go lint
+          STOCK_NETWORK=bridge stock_run golangci/golangci-lint:v2.15.0 -- sh tests/container/go-lint
+          stock_run goreleaser/goreleaser:v2.20.0 -- sh tests/container/release-config
+          STOCK_NETWORK=bridge stock_run node:24.22.2 -- sh tests/container/markdown
+          stock_readonly koalaman/shellcheck:v0.11.0 /bin/shellcheck -x -P SCRIPTDIR tests/container/stock tests/container/check-stock tests/container/go tests/container/go-lint tests/container/release-config tests/container/markdown
+          stock_finish
