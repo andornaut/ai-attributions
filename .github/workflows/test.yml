@@ -32,12 +32,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
+  test-platform:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     # Capped well under the six-hour default: nothing here runs longer than
     # six minutes, so a job still going at fifteen has hung rather than failed.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
 
     steps:
       - name: Checkout code
@@ -76,17 +80,18 @@ jobs:
 
       - name: Upload coverage
         uses: actions/upload-artifact@v7.0.2
+        if: matrix.os == 'ubuntu-latest'
         with:
           name: coverage
           path: coverage.txt
 
       # The action as another repository consumes it: action.yml driving a real
       # binary over the history the branch added, which the Go suite cannot
-      # reach. A step in this job rather than one of its own, so the Test check
-      # that already guards main covers it, with no second name for the ruleset
-      # to have to carry.
+      # reach. Run once on the original Linux runner, under the required Test
+      # check that aggregates both platforms.
       - name: Scan the branch with the action in this repository
         uses: ./
+        if: matrix.os == 'ubuntu-latest'
         with:
           # The rolling build, not the release action.yml defaults to: this
           # repository is where that default gets bumped, and a bump names a
@@ -96,6 +101,27 @@ jobs:
           version: dev
           emdashes: true
           agents-files: true
+
+  # A matrix leg reports as `Test (ubuntu-latest)`, a name that changes whenever
+  # the matrix does, and a required check that stops reporting blocks every pull
+  # request forever. This job reports under one stable name, so branch
+  # protection has a single check to require no matter which platforms are
+  # added.
+  #
+  # `always()` and not `!cancelled()`, which looks tidier and is a hole: a
+  # cancelled run would skip this job, and GitHub counts a skipped required
+  # check as passing, so an unverified commit becomes mergeable. Failing closed
+  # costs a red check on runs that were cancelled anyway.
+  test:
+    name: Test
+    needs: test-platform
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check that every platform passed
+        run: '[ "${{ needs.test-platform.result }}" = success ]'
 
   lint:
     name: Lint
